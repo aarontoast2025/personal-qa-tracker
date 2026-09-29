@@ -1,10 +1,29 @@
 import { createClient } from "@/lib/supabase/server";
+import { SettingsForm } from "@/components/settings/settings-form";
 
 export default async function SettingsPage() {
   const supabase = await createClient();
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
+
+  const [
+    { data: settings },
+    { count: assignmentsCount },
+    { count: evaluationsCount },
+    { count: agentsCount },
+    { count: rubricsCount },
+    { data: lastLog },
+  ] = await Promise.all([
+    supabase.from("app_settings").select("*").limit(1).maybeSingle(),
+    supabase.from("assignments").select("*", { count: "exact", head: true }),
+    supabase.from("evaluations").select("*", { count: "exact", head: true }),
+    supabase.from("agents").select("*", { count: "exact", head: true }),
+    supabase.from("rubrics").select("*", { count: "exact", head: true }),
+    supabase
+      .from("sync_logs")
+      .select("*")
+      .order("started_at", { ascending: false })
+      .limit(1)
+      .maybeSingle(),
+  ]);
 
   return (
     <div className="space-y-6">
@@ -13,18 +32,24 @@ export default async function SettingsPage() {
           Tracker Settings
         </h1>
         <p className="text-xs text-slate-500 dark:text-slate-400 mt-1">
-          Configure Google Sheet ID, sync intervals, and API preferences.
+          Manage your Google Sheet connection, sync settings, and local database cache.
         </p>
       </div>
 
-      <div className="bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 p-6">
-        <h2 className="text-sm font-semibold text-slate-900 dark:text-white mb-1">
-          Connected Account
-        </h2>
-        <p className="text-xs text-slate-500 dark:text-slate-400 mb-4">
-          Current authenticated QA user: <span className="font-mono text-slate-700 dark:text-slate-300">{user?.email}</span>
-        </p>
-      </div>
+      <SettingsForm
+        initialSheetId={settings?.google_sheet_id || ""}
+        initialCounts={{
+          assignments: assignmentsCount || 0,
+          evaluations: evaluationsCount || 0,
+          agents: agentsCount || 0,
+          rubrics: rubricsCount || 0,
+        }}
+        lastSyncedAt={
+          lastLog?.completed_at
+            ? new Date(lastLog.completed_at).toLocaleString()
+            : null
+        }
+      />
     </div>
   );
 }

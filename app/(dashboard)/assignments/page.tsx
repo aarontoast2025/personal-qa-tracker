@@ -13,9 +13,6 @@ export default async function AssignmentsPage() {
           <h1 className="text-2xl font-bold tracking-tight text-slate-900 dark:text-white">
             My Evaluation Queue
           </h1>
-          <p className="text-xs text-slate-500 dark:text-slate-400 mt-1">
-            Logged in as <span className="font-medium text-slate-700 dark:text-slate-300">{user?.email}</span>
-          </p>
         </div>
       </div>
 

@@ -2,7 +2,8 @@ import { redirect } from "next/navigation";
 import Link from "next/link";
 import { createClient } from "@/lib/supabase/server";
 import { signOut } from "@/app/auth/actions";
-import { ClipboardList, LogOut, Settings, Sparkles, User } from "lucide-react";
+import { NavLinks } from "@/components/layout/nav-links";
+import { LogOut, Sparkles, User } from "lucide-react";
 
 export default async function DashboardLayout({
   children,
@@ -35,23 +36,10 @@ export default async function DashboardLayout({
               <span>QA Tracker</span>
             </Link>
 
-            {/* Navigation Links */}
-            <nav className="hidden sm:flex items-center gap-1">
-              <Link
-                href="/assignments"
-                className="flex items-center gap-2 px-3 py-1.5 rounded-lg text-xs font-medium text-slate-700 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors"
-              >
-                <ClipboardList className="w-3.5 h-3.5" />
-                Assignments
-              </Link>
-              <Link
-                href="/settings"
-                className="flex items-center gap-2 px-3 py-1.5 rounded-lg text-xs font-medium text-slate-700 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors"
-              >
-                <Settings className="w-3.5 h-3.5" />
-                Settings
-              </Link>
-            </nav>
+            {/* Navigation Links with Active Indicator */}
+            <div className="hidden sm:block">
+              <NavLinks />
+            </div>
           </div>
 
           {/* User profile & Logout */}
