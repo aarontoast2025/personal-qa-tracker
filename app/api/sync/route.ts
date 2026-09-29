@@ -9,7 +9,7 @@ import {
   syncRubricDescriptions,
   syncFeedbackTemplates,
 } from "@/lib/google/sync-service";
-import { fetchSheetValues, rowsToObjects } from "@/lib/google/sheets";
+import { fetchSheetCsv, fetchSheetValues, rowsToObjects } from "@/lib/google/sheets";
 import fs from "fs";
 import path from "path";
 
@@ -62,8 +62,18 @@ export async function POST(request: Request) {
     // empty body
   }
 
+  // Get sheetId from body or from app_settings
+  let sheetId = body.sheetId?.trim();
+  if (!sheetId) {
+    const { data: settings } = await supabase
+      .from("app_settings")
+      .select("google_sheet_id")
+      .limit(1)
+      .maybeSingle();
+    sheetId = settings?.google_sheet_id;
+  }
+
   const action = body.action || "sync-live";
-  const sheetId = body.sheetId?.trim();
 
   // 1. Seed from local CSV files
   if (action === "seed-csv") {
@@ -146,7 +156,7 @@ export async function POST(request: Request) {
   // 2. Live Sync from Google Sheet
   if (!sheetId) {
     return NextResponse.json(
-      { error: "Please provide a valid Google Sheet ID in Settings." },
+      { error: "No Google Sheet ID configured. Please enter your Google Sheet ID in Settings." },
       { status: 400 }
     );
   }
@@ -154,31 +164,54 @@ export async function POST(request: Request) {
   try {
     const results: Record<string, number> = {};
 
-    // Fetch and sync Assignments tab
-    try {
-      const rows = await fetchSheetValues(sheetId, "Assignments!A1:Z");
-      const objects = rowsToObjects(rows);
-      results.assignments = await syncAssignments(supabase, objects);
-    } catch (err: any) {
-      console.warn("Assignments sync warning:", err.message);
+    // Helper to fetch rows either via GViz CSV or Google API
+    async function getTabRows(tabName: string): Promise<Record<string, string>[]> {
+      try {
+        return await fetchSheetCsv(sheetId, tabName);
+      } catch (e) {
+        const raw = await fetchSheetValues(sheetId, `${tabName}!A1:Z`);
+        return rowsToObjects(raw);
+      }
     }
 
-    // Fetch and sync Evaluations tab
+    // 1. Sync Rubrics first (so foreign keys on assignments resolve cleanly)
     try {
-      const rows = await fetchSheetValues(sheetId, "Evaluations!A1:Z");
-      const objects = rowsToObjects(rows);
-      results.evaluations = await syncEvaluations(supabase, objects);
-    } catch (err: any) {
-      console.warn("Evaluations sync warning:", err.message);
+      const rubrics = await getTabRows("Rubrics");
+      if (rubrics.length > 0) {
+        results.rubrics = await syncRubrics(supabase, rubrics);
+      }
+    } catch (e: any) {
+      console.warn("Rubrics tab sync warning:", e.message);
     }
 
-    // Fetch and sync Agents tab
+    // 2. Sync Agents
     try {
-      const rows = await fetchSheetValues(sheetId, "Agents!A1:Z");
-      const objects = rowsToObjects(rows);
-      results.agents = await syncAgents(supabase, objects);
-    } catch (err: any) {
-      console.warn("Agents sync warning:", err.message);
+      const agents = await getTabRows("Agents");
+      if (agents.length > 0) {
+        results.agents = await syncAgents(supabase, agents);
+      }
+    } catch (e: any) {
+      console.warn("Agents tab sync warning:", e.message);
+    }
+
+    // 3. Sync Assignments
+    try {
+      const assignments = await getTabRows("Assignments");
+      if (assignments.length > 0) {
+        results.assignments = await syncAssignments(supabase, assignments);
+      }
+    } catch (e: any) {
+      console.warn("Assignments tab sync warning:", e.message);
+    }
+
+    // 4. Sync Evaluations (so Interaction IDs are all known)
+    try {
+      const evaluations = await getTabRows("Evaluations");
+      if (evaluations.length > 0) {
+        results.evaluations = await syncEvaluations(supabase, evaluations);
+      }
+    } catch (e: any) {
+      console.warn("Evaluations tab sync warning:", e.message);
     }
 
     await supabase.from("sync_logs").insert({
@@ -192,7 +225,7 @@ export async function POST(request: Request) {
 
     return NextResponse.json({
       success: true,
-      message: "Successfully synced data from Google Sheets.",
+      message: `Successfully fetched latest data from Google Sheet (${results.assignments || 0} assignments, ${results.evaluations || 0} evaluations).`,
       counts: results,
     });
   } catch (err: any) {
@@ -201,7 +234,7 @@ export async function POST(request: Request) {
       {
         error:
           err.message ||
-          "Failed to fetch data from Google Sheet. Please check credentials and Sheet permissions.",
+          "Failed to fetch data from Google Sheet. Please check your Google Sheet ID.",
       },
       { status: 500 }
     );

@@ -1,4 +1,5 @@
 import { google } from "googleapis";
+import { parseCsv } from "@/lib/csv-parser";
 
 export function extractSheetId(input: string): string {
   if (!input) return "";
@@ -8,6 +9,21 @@ export function extractSheetId(input: string): string {
     return match[1];
   }
   return trimmed;
+}
+
+export async function fetchSheetCsv(
+  spreadsheetId: string,
+  sheetName: string
+): Promise<Record<string, string>[]> {
+  const url = `https://docs.google.com/spreadsheets/d/${spreadsheetId}/gviz/tq?tqx=out:csv&sheet=${encodeURIComponent(
+    sheetName
+  )}`;
+  const res = await fetch(url, { cache: "no-store" });
+  if (!res.ok) {
+    throw new Error(`Failed to fetch tab "${sheetName}": HTTP ${res.status}`);
+  }
+  const text = await res.text();
+  return parseCsv(text);
 }
 
 export async function getGoogleSheetsClient(customCredentials?: {
@@ -20,8 +36,7 @@ export async function getGoogleSheetsClient(customCredentials?: {
     process.env.GOOGLE_CLIENT_EMAIL;
 
   let privateKey =
-    customCredentials?.privateKey ||
-    process.env.GOOGLE_PRIVATE_KEY;
+    customCredentials?.privateKey || process.env.GOOGLE_PRIVATE_KEY;
 
   if (privateKey) {
     // Handle escaped newlines from environment variables
@@ -51,10 +66,23 @@ export async function fetchSheetValues(
   range: string,
   credentials?: { clientEmail?: string; privateKey?: string }
 ): Promise<string[][]> {
+  // If range is like "Assignments!A1:Z", extract sheet name and try fetchSheetCsv first
+  const sheetName = range.split("!")[0];
+  try {
+    const records = await fetchSheetCsv(spreadsheetId, sheetName);
+    if (records.length > 0) {
+      const headers = Object.keys(records[0]);
+      const rows = [headers, ...records.map((r) => headers.map((h) => r[h] || ""))];
+      return rows;
+    }
+  } catch (err) {
+    // Fall back to official API if available
+  }
+
   const sheets = await getGoogleSheetsClient(credentials);
   if (!sheets) {
     throw new Error(
-      "Google Sheets credentials not configured. Please provide a Google Service Account email and private key in Settings or environment variables."
+      "Google Sheets credentials not configured. Please ensure the sheet is accessible or configure a Service Account."
     );
   }
 
