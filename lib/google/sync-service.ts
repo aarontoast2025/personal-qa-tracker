@@ -2,9 +2,17 @@ import { SupabaseClient } from "@supabase/supabase-js";
 import { fetchSheetValues, rowsToObjects } from "./sheets";
 
 // Helper to normalize Date string like "8/31/2026" or "2026-08-31" to "2026-08-31"
-export function normalizeDate(dateStr: string): string {
-  if (!dateStr) return new Date().toISOString().split("T")[0];
+export function normalizeDate(dateStr: string | null | undefined): string | null {
+  if (!dateStr) return null;
   const trimmed = dateStr.trim();
+  if (
+    !trimmed ||
+    trimmed.toLowerCase() === "n/a" ||
+    trimmed.toLowerCase() === "none" ||
+    trimmed === "-"
+  ) {
+    return null;
+  }
   if (/^\d{4}-\d{2}-\d{2}/.test(trimmed)) {
     return trimmed.split("T")[0];
   }
@@ -12,10 +20,11 @@ export function normalizeDate(dateStr: string): string {
   if (parts.length === 3) {
     const month = parts[0].padStart(2, "0");
     const day = parts[1].padStart(2, "0");
-    const year = parts[2];
+    let year = parts[2];
+    if (year.length === 2) year = `20${year}`;
     return `${year}-${month}-${day}`;
   }
-  return trimmed;
+  return null;
 }
 
 // Helper to safely parse JSON
@@ -113,22 +122,30 @@ export async function syncEvaluations(
 ): Promise<number> {
   if (!rows || rows.length === 0) return 0;
 
+  // Fetch all known assignment IDs to prevent foreign key violations on historical evaluations
+  const { data: knownAsgs } = await supabase.from("assignments").select("id");
+  const knownAsgIds = new Set((knownAsgs || []).map((a) => a.id));
+
   const records = rows
     .filter((r) => r.ID && r["Interaction ID"])
-    .map((r) => ({
-      id: String(r.ID).trim(),
-      submitted_at: r["Submitted At"] || new Date().toISOString(),
-      agent_name: r["Agent Name"] || "Unknown",
-      agent_snapshot: safeJsonParse(r["Agent Snapshot"]),
-      score: parseFloat(r.Score) || 0,
-      shift_snapshot: r["Shift Snapshot"] || null,
-      rubric_id: r["Rubric ID"] || null,
-      evaluation_details: safeJsonParse(r["Evaluation Details"]),
-      assignment_id: r["Assignment ID"] || null,
-      interaction_id: String(r["Interaction ID"]).trim(),
-      date_of_interaction: r["Date of Interaction"]
-        ? normalizeDate(r["Date of Interaction"])
-        : null,
+    .map((r) => {
+      const rawAsgId = r["Assignment ID"] ? String(r["Assignment ID"]).trim() : null;
+      const validAsgId = rawAsgId && knownAsgIds.has(rawAsgId) ? rawAsgId : null;
+
+      return {
+        id: String(r.ID).trim(),
+        submitted_at: r["Submitted At"] || new Date().toISOString(),
+        agent_name: r["Agent Name"] || "Unknown",
+        agent_snapshot: safeJsonParse(r["Agent Snapshot"]),
+        score: parseFloat(r.Score) || 0,
+        shift_snapshot: r["Shift Snapshot"] || null,
+        rubric_id: r["Rubric ID"] || null,
+        evaluation_details: safeJsonParse(r["Evaluation Details"]),
+        assignment_id: validAsgId,
+        interaction_id: String(r["Interaction ID"]).trim(),
+        date_of_interaction: r["Date of Interaction"]
+          ? normalizeDate(r["Date of Interaction"])
+          : null,
       call_ani_dnis: r["Call ANI/DNIS"] || null,
       case_no: r["Case No."] || null,
       call_duration: r["Call Duration"] || null,
@@ -152,7 +169,8 @@ export async function syncEvaluations(
         : null,
       sync_status: "synced",
       synced_at: new Date().toISOString(),
-    }));
+    };
+  });
 
   const { error } = await supabase
     .from("evaluations")

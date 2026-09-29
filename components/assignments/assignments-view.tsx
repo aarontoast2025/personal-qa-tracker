@@ -1,20 +1,19 @@
 "use client";
 
-import { useEffect, useState, useTransition } from "react";
+import { useEffect, useState } from "react";
 import Link from "next/link";
 import { createClient } from "@/lib/supabase/client";
 import { Assignment } from "@/lib/types";
-import { ViewMode, getDateRange } from "@/lib/date-utils";
+import { ViewMode, getDateRange, formatDayDisplay } from "@/lib/date-utils";
 import { DateNavigation } from "./date-navigation";
 import { FetchButton } from "./fetch-button";
 import {
-  AlertCircle,
+  Calendar,
   CheckCircle2,
   Clock,
   ExternalLink,
   Filter,
   Search,
-  User,
 } from "lucide-react";
 
 interface AssignmentsViewProps {
@@ -24,20 +23,25 @@ interface AssignmentsViewProps {
 export function AssignmentsView({ userEmail }: AssignmentsViewProps) {
   const supabase = createClient();
 
-  const [mode, setMode] = useState<ViewMode>("month");
-  // Default to September 2026 or current date
-  const [currentDate, setCurrentDate] = useState<Date>(() => new Date(2026, 8, 29));
+  // Requirement: Default tab should be "Day"
+  const [mode, setMode] = useState<ViewMode>("day");
+  // Default date
+  const [currentDate, setCurrentDate] = useState<Date>(() => new Date(2026, 8, 8)); // Sep 8, 2026 (matching active assignments date)
   const [assignments, setAssignments] = useState<Assignment[]>([]);
+  const [totalUserAssignments, setTotalUserAssignments] = useState<number>(0);
+  const [latestAssignmentDate, setLatestAssignmentDate] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [statusFilter, setStatusFilter] = useState<string>("all");
   const [searchQuery, setSearchQuery] = useState("");
+  const [syncNotice, setSyncNotice] = useState<string | null>(null);
 
   const { startStr, endStr } = getDateRange(currentDate, mode);
 
   async function loadAssignments() {
     setIsLoading(true);
     try {
-      let query = supabase
+      // 1. Fetch assignments in current date range for the logged-in user
+      const { data, error } = await supabase
         .from("assignments")
         .select("*")
         .ilike("qa_email", userEmail)
@@ -45,11 +49,31 @@ export function AssignmentsView({ userEmail }: AssignmentsViewProps) {
         .lte("date", endStr)
         .order("date", { ascending: false });
 
-      const { data, error } = await query;
       if (error) {
         console.error("Error loading assignments:", error);
       } else {
         setAssignments((data as Assignment[]) || []);
+      }
+
+      // 2. Fetch total assignments count for this user across all dates
+      const { count: totalCount } = await supabase
+        .from("assignments")
+        .select("*", { count: "exact", head: true })
+        .ilike("qa_email", userEmail);
+
+      setTotalUserAssignments(totalCount || 0);
+
+      // 3. Find latest assignment date for quick jump
+      const { data: latest } = await supabase
+        .from("assignments")
+        .select("date")
+        .ilike("qa_email", userEmail)
+        .order("date", { ascending: false })
+        .limit(1)
+        .maybeSingle();
+
+      if (latest?.date) {
+        setLatestAssignmentDate(latest.date);
       }
     } catch (err) {
       console.error("Query failed:", err);
@@ -61,6 +85,13 @@ export function AssignmentsView({ userEmail }: AssignmentsViewProps) {
   useEffect(() => {
     loadAssignments();
   }, [mode, currentDate, userEmail]);
+
+  // Handle successful sync from the icon-only fetch button
+  function handleSyncSuccess() {
+    setSyncNotice("Google Sheet data successfully fetched and stored in Supabase!");
+    setTimeout(() => setSyncNotice(null), 5000);
+    loadAssignments();
+  }
 
   // Filtered by status and search
   const filteredAssignments = assignments.filter((item) => {
@@ -89,7 +120,15 @@ export function AssignmentsView({ userEmail }: AssignmentsViewProps) {
 
   return (
     <div className="space-y-5">
-      {/* Header with Title and Icon-Only Fetch Button */}
+      {/* Sync Success Alert */}
+      {syncNotice && (
+        <div className="flex items-center gap-2 p-3.5 rounded-xl bg-emerald-50 dark:bg-emerald-950/40 border border-emerald-200 dark:border-emerald-800 text-emerald-800 dark:text-emerald-300 text-xs font-medium animate-fadeIn">
+          <CheckCircle2 className="w-4 h-4 text-emerald-600 flex-shrink-0" />
+          <span>{syncNotice}</span>
+        </div>
+      )}
+
+      {/* Header with Title, Status Pills, and Icon-Only Fetch Button */}
       <div className="flex items-center justify-between gap-4">
         <div>
           <h1 className="text-2xl font-bold tracking-tight text-slate-900 dark:text-white">
@@ -108,12 +147,12 @@ export function AssignmentsView({ userEmail }: AssignmentsViewProps) {
             </span>
           </div>
 
-          {/* Icon-Only Fetch Button */}
-          <FetchButton onSyncComplete={loadAssignments} />
+          {/* Icon-Only Fetch Button (Requirement: Icon only, no text) */}
+          <FetchButton onSyncComplete={handleSyncSuccess} />
         </div>
       </div>
 
-      {/* Date Navigation & Timeframe Selector */}
+      {/* Date Navigation & Timeframe Selector (Default: Day) */}
       <DateNavigation
         mode={mode}
         onModeChange={setMode}
@@ -170,16 +209,46 @@ export function AssignmentsView({ userEmail }: AssignmentsViewProps) {
             <p className="text-xs">Loading assignments...</p>
           </div>
         ) : filteredAssignments.length === 0 ? (
-          <div className="py-16 text-center max-w-sm mx-auto px-4">
+          <div className="py-16 text-center max-w-md mx-auto px-4">
             <div className="w-10 h-10 rounded-xl bg-slate-100 dark:bg-slate-800 text-slate-400 flex items-center justify-center mx-auto mb-3">
               <Filter className="w-5 h-5" />
             </div>
             <h3 className="text-sm font-semibold text-slate-800 dark:text-slate-200 mb-1">
-              No assignments found
+              No assignments found for this {mode}
             </h3>
             <p className="text-xs text-slate-500 dark:text-slate-400 mb-4">
-              There are no assignments matching your current date filter and criteria. Click the refresh icon above to pull the latest from your Google Sheet.
+              {totalUserAssignments > 0 ? (
+                <>
+                  You have <span className="font-semibold text-slate-700 dark:text-slate-300">{totalUserAssignments}</span> total assignments in your queue.
+                </>
+              ) : (
+                "Click the fetch icon above to pull your assignments from the Google Sheet."
+              )}
             </p>
+
+            {/* Quick helper jumpers if user has assignments on other dates */}
+            {latestAssignmentDate && (
+              <div className="flex flex-wrap items-center justify-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => {
+                    const [y, m, d] = latestAssignmentDate.split("-").map(Number);
+                    setCurrentDate(new Date(y, m - 1, d));
+                  }}
+                  className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-amber-500/10 text-amber-600 dark:text-amber-400 hover:bg-amber-500/20 text-xs font-medium border border-amber-500/20 transition-colors"
+                >
+                  <Calendar className="w-3.5 h-3.5" />
+                  Jump to {latestAssignmentDate}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setMode("month")}
+                  className="px-3 py-1.5 rounded-xl bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300 hover:bg-slate-200 text-xs font-medium transition-colors"
+                >
+                  Switch to Month View
+                </button>
+              </div>
+            )}
           </div>
         ) : (
           <div className="overflow-x-auto">
