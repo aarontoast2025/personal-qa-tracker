@@ -360,6 +360,7 @@
     var currentRubric = DEFAULT_FALLBACK_RUBRIC;
     var globalFeedbackGeneral = [];
     var globalFeedbackTags = [];
+    var globalRubricDescriptions = [];
     var globalUsers = [];
     var globalAssignments = [];
     var selectedAssignmentId = "";
@@ -2185,6 +2186,7 @@
                         state[key].sel = selectedVal;
                         state[key].selIndex = foundIdx;
                         state[key].selectedTags = [];
+                        state[key].isCustomUserText = false;
                         updateSelectStyles();
                         renderTags();
                         updateHeaderBg();
@@ -2206,6 +2208,7 @@
                             state[key].sel = opt.id;
                             state[key].selIndex = optIdx;
                             state[key].selectedTags = [];
+                            state[key].isCustomUserText = false;
                             updateBtnStyles();
                             renderTags();
                             updateHeaderBg();
@@ -2254,6 +2257,7 @@
                 textarea.placeholder = "Comments";
                 addListener(textarea, "input", function(e){
                     state[key].text = e.target.value;
+                    state[key].isCustomUserText = true;
                     updateHeaderBg();
                 });
                 itemBody.appendChild(textarea);
@@ -2297,10 +2301,14 @@
 
     var refreshFeedbackTagsAndGeneral = function() {
         Object.keys(state).forEach(function(k){
-            if (state[k] && typeof state[k].renderTags === 'function') {
-                state[k].renderTags();
+            var s = state[k];
+            if (!s) return;
+            if (typeof s.renderTags === 'function') {
+                s.renderTags();
             }
-            if (state[k] && state[k].domTextarea && !state[k].domTextarea.value.trim()) {
+            var curVal = s.domTextarea ? s.domTextarea.value : (s.text || "");
+            var isPolluted = curVal && (curVal.includes('Knowledge Base Articles') || curVal.startsWith('Behavior:') || curVal.startsWith('Guidelines:') || curVal.includes('"sections":'));
+            if (!curVal.trim() || isPolluted || !s.isCustomUserText) {
                 updateText(k);
             }
         });
@@ -3899,91 +3907,42 @@
     var loadTemplatesFromSupabase = function() {
         var sKey = SUPABASE_KEY || storage.get('supabase_key', DEFAULT_SUPABASE_KEY);
         if (!sKey) return Promise.resolve(false);
-        return Promise.all([
-            supabaseFetch('feedback_templates?select=*', 'GET').catch(function(){ return []; }),
-            supabaseFetch('rubric_descriptions?select=*', 'GET').catch(function(){ return []; })
-        ])
-        .then(function(res) {
-            var rows = res[0] || [];
-            var descRows = res[1] || [];
-            if (Array.isArray(rows) && rows.length > 0) {
-                globalFeedbackTags = rows.filter(function(t){
-                    return !!(t.button_label && String(t.button_label).trim());
-                }).map(function(t){
-                    return {
-                        buttonLabel: t.button_label,
-                        feedbackText: t.feedback_text,
-                        sectionIndex: t.section_index,
-                        itemIndex: t.item_index,
-                        optionIndex: t.option_index,
-                        rubricId: t.rubric_id
-                    };
-                });
+        return supabaseFetch('feedback_templates?select=*', 'GET')
+            .then(function(rows) {
+                if (Array.isArray(rows) && rows.length > 0) {
+                    globalFeedbackTags = rows.filter(function(t){
+                        return !!(t.button_label && String(t.button_label).trim());
+                    }).map(function(t){
+                        return {
+                            buttonLabel: t.button_label,
+                            feedbackText: t.feedback_text,
+                            sectionIndex: t.section_index,
+                            itemIndex: t.item_index,
+                            optionIndex: t.option_index,
+                            rubricId: t.rubric_id
+                        };
+                    });
 
-                var generalTemplates = rows.filter(function(t){
-                    return !(t.button_label && String(t.button_label).trim());
-                }).map(function(t){
-                    return {
-                        feedbackText: t.feedback_text,
-                        sectionIndex: t.section_index,
-                        itemIndex: t.item_index,
-                        optionIndex: t.option_index,
-                        rubricId: t.rubric_id
-                    };
-                });
-                if (generalTemplates.length > 0) {
-                    globalFeedbackGeneral = generalTemplates;
+                    var generalTemplates = rows.filter(function(t){
+                        return !(t.button_label && String(t.button_label).trim());
+                    }).map(function(t){
+                        return {
+                            feedbackText: t.feedback_text,
+                            sectionIndex: t.section_index,
+                            itemIndex: t.item_index,
+                            optionIndex: t.option_index,
+                            rubricId: t.rubric_id
+                        };
+                    });
+                    if (generalTemplates.length > 0) {
+                        globalFeedbackGeneral = generalTemplates;
+                    }
                 }
-            }
 
-            if (Array.isArray(descRows) && descRows.length > 0) {
-                descRows.forEach(function(rd){
-                    var descVal = rd.description;
-                    var compiledText = "";
-                    if (Array.isArray(descVal)) {
-                        descVal.forEach(function(group){
-                            if (group && Array.isArray(group.sections)) {
-                                group.sections.forEach(function(sec){
-                                    var secName = sec.name || "";
-                                    var secContent = (sec.content || []).map(function(c){
-                                        return c.value || c.text || "";
-                                    }).filter(Boolean).join(" ");
-                                    if (secContent) {
-                                        compiledText += (secName ? (secName + ": ") : "") + secContent + "\n";
-                                    }
-                                });
-                            }
-                        });
-                    } else if (typeof descVal === 'string') {
-                        compiledText = descVal;
-                    }
-
-                    compiledText = compiledText.trim();
-                    if (compiledText) {
-                        var existing = globalFeedbackGeneral.find(function(f){
-                            return f.rubricId === rd.rubric_id && f.sectionIndex === rd.section_index && f.itemIndex === rd.item_index && f.optionIndex === rd.option_index;
-                        });
-                        if (existing) {
-                            if (!existing.feedbackText.includes(compiledText)) {
-                                existing.feedbackText = (existing.feedbackText + "\n\n" + compiledText).trim();
-                            }
-                        } else {
-                            globalFeedbackGeneral.push({
-                                feedbackText: compiledText,
-                                sectionIndex: rd.section_index,
-                                itemIndex: rd.item_index,
-                                optionIndex: rd.option_index,
-                                rubricId: rd.rubric_id
-                            });
-                        }
-                    }
-                });
-            }
-
-            refreshFeedbackTagsAndGeneral();
-            return true;
-        })
-        .catch(function() { return false; });
+                refreshFeedbackTagsAndGeneral();
+                return true;
+            })
+            .catch(function() { return false; });
     };
 
     // --- Sync & Initialization Logic (Bulk Processing & Local IndexedDB Storage) ---
@@ -4053,48 +4012,8 @@
                             }
                         }
 
-                        if (Array.isArray(data.rubricDescriptions) && data.rubricDescriptions.length > 0) {
-                            data.rubricDescriptions.forEach(function(rd){
-                                var descVal = rd.description;
-                                var compiledText = "";
-                                if (Array.isArray(descVal)) {
-                                    descVal.forEach(function(group){
-                                        if (group && Array.isArray(group.sections)) {
-                                            group.sections.forEach(function(sec){
-                                                var secName = sec.name || "";
-                                                var secContent = (sec.content || []).map(function(c){
-                                                    return c.value || c.text || "";
-                                                }).filter(Boolean).join(" ");
-                                                if (secContent) {
-                                                    compiledText += (secName ? (secName + ": ") : "") + secContent + "\n";
-                                                }
-                                            });
-                                        }
-                                    });
-                                } else if (typeof descVal === 'string') {
-                                    compiledText = descVal;
-                                }
-
-                                compiledText = compiledText.trim();
-                                if (compiledText) {
-                                    var existing = globalFeedbackGeneral.find(function(f){
-                                        return f.rubricId === rd.rubric_id && f.sectionIndex === rd.section_index && f.itemIndex === rd.item_index && f.optionIndex === rd.option_index;
-                                    });
-                                    if (existing) {
-                                        if (!existing.feedbackText.includes(compiledText)) {
-                                            existing.feedbackText = (existing.feedbackText + "\n\n" + compiledText).trim();
-                                        }
-                                    } else {
-                                        globalFeedbackGeneral.push({
-                                            feedbackText: compiledText,
-                                            sectionIndex: rd.section_index,
-                                            itemIndex: rd.item_index,
-                                            optionIndex: rd.option_index,
-                                            rubricId: rd.rubric_id
-                                        });
-                                    }
-                                }
-                            });
+                        if (Array.isArray(data.rubricDescriptions)) {
+                            globalRubricDescriptions = data.rubricDescriptions;
                         }
 
                         if (Array.isArray(data.assignments)) {
@@ -4142,7 +4061,13 @@
                     globalAssignments = cached.assignments;
                 }
                 globalFeedbackTags = cached.feedbackChips || [];
-                globalFeedbackGeneral = cached.feedbackGeneral || [];
+                globalFeedbackGeneral = (cached.feedbackGeneral || []).filter(function(item){
+                    var text = item.feedbackText || item.feedback_text || "";
+                    if (typeof text === 'string' && (text.includes('"sections":') || text.includes('Knowledge Base Articles') || text.startsWith('Behavior:') || text.startsWith('Guidelines:'))) {
+                        return false;
+                    }
+                    return true;
+                });
                 globalUsers = cached.users || [];
                 if (cached.evalTypes && Array.isArray(cached.evalTypes) && cached.evalTypes.length > 0) {
                     globalEvalTypes = cached.evalTypes;
