@@ -123,6 +123,9 @@
                 queryParts.push(encodeURIComponent(k) + '=' + encodeURIComponent(valStr));
             }
         });
+        var sep = url.indexOf('?') === -1 ? '?' : '&';
+        var fullUrl = queryParts.length ? (url + sep + queryParts.join('&')) : url;
+
         // Direct CORS fetch for Next.js Tracker API
         if (url.indexOf('/api/bookmarklet') !== -1) {
             return fetch(fullUrl, {

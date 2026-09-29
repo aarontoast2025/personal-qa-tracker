@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useRef, useEffect } from "react";
 import { saveGoogleSheetId, saveGeminiApiKey } from "@/app/(dashboard)/settings/actions";
 import {
   CheckCircle2,
@@ -37,6 +37,13 @@ export function SettingsForm({
   } | null>(null);
 
   const bookmarkletCode = `javascript:(function(){var s=document.createElement('script');s.src='https://personal-qa-tracker.vercel.app/bookmarklet.js?t='+Date.now();document.body.appendChild(s);})();`;
+  const bookmarkletRef = useRef<HTMLAnchorElement>(null);
+
+  useEffect(() => {
+    if (bookmarkletRef.current) {
+      bookmarkletRef.current.setAttribute("href", bookmarkletCode);
+    }
+  }, [bookmarkletCode]);
 
   async function handleSaveSheet(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault();
@@ -274,11 +281,12 @@ export function SettingsForm({
                 Drag this button to your bookmarks bar:
                 <div className="my-2.5">
                   <a
-                    href={bookmarkletCode}
+                    ref={bookmarkletRef}
+                    href="#"
                     onClick={(e) => {
                       // Prevent navigation if clicked directly
                       e.preventDefault();
-                      alert("Drag this button to your bookmarks bar, or copy the code below!");
+                      alert("Drag this button to your bookmarks bar, or click 'Copy Code' below and paste it as the bookmark's URL.");
                     }}
                     className="inline-flex items-center gap-2 px-3.5 py-2 rounded-xl bg-amber-500 hover:bg-amber-600 text-slate-950 font-bold text-xs shadow-sm cursor-grab active:cursor-grabbing select-none"
                     title="Drag to bookmarks bar"
