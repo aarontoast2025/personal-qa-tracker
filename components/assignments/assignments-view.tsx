@@ -4,7 +4,8 @@ import { useEffect, useState } from "react";
 import Link from "next/link";
 import { createClient } from "@/lib/supabase/client";
 import { Assignment } from "@/lib/types";
-import { ViewMode, getDateRange, formatDayDisplay } from "@/lib/date-utils";
+import { ViewMode, getDateRange } from "@/lib/date-utils";
+import { format } from "date-fns";
 import { DateNavigation } from "./date-navigation";
 import { FetchButton } from "./fetch-button";
 import {
@@ -20,13 +21,24 @@ interface AssignmentsViewProps {
   userEmail: string;
 }
 
+// Format date for table display: e.g. "Sep 29, 2026, Tue"
+function formatTableDate(dateStr: string): string {
+  if (!dateStr) return "-";
+  const parts = dateStr.split("-").map(Number);
+  if (parts.length === 3) {
+    const d = new Date(parts[0], parts[1] - 1, parts[2]);
+    return format(d, "MMM d, yyyy, EEE");
+  }
+  return dateStr;
+}
+
 export function AssignmentsView({ userEmail }: AssignmentsViewProps) {
   const supabase = createClient();
 
   // Requirement: Default tab should be "Day"
   const [mode, setMode] = useState<ViewMode>("day");
-  // Default date
-  const [currentDate, setCurrentDate] = useState<Date>(() => new Date(2026, 8, 8)); // Sep 8, 2026 (matching active assignments date)
+  // Requirement: Default to current date/week/month
+  const [currentDate, setCurrentDate] = useState<Date>(() => new Date());
   const [assignments, setAssignments] = useState<Assignment[]>([]);
   const [totalUserAssignments, setTotalUserAssignments] = useState<number>(0);
   const [latestAssignmentDate, setLatestAssignmentDate] = useState<string | null>(null);
@@ -158,7 +170,7 @@ export function AssignmentsView({ userEmail }: AssignmentsViewProps) {
         onModeChange={setMode}
         currentDate={currentDate}
         onDateChange={setCurrentDate}
-        onToday={() => setCurrentDate(new Date(2026, 8, 29))}
+        onToday={() => setCurrentDate(new Date())}
       />
 
       {/* Filter and Search Bar */}
@@ -256,11 +268,11 @@ export function AssignmentsView({ userEmail }: AssignmentsViewProps) {
               <thead>
                 <tr className="border-b border-slate-200 dark:border-slate-800 bg-slate-50/75 dark:bg-slate-800/40 text-slate-500 dark:text-slate-400 font-medium">
                   <th className="py-3 px-4">Date</th>
+                  <th className="py-3 px-4">EID</th>
                   <th className="py-3 px-4">Agent Name</th>
                   <th className="py-3 px-4">Channel / Skill</th>
                   <th className="py-3 px-4">Tier</th>
                   <th className="py-3 px-4">Type</th>
-                  <th className="py-3 px-4">Rubric</th>
                   <th className="py-3 px-4">Status</th>
                   <th className="py-3 px-4 text-right">Action</th>
                 </tr>
@@ -275,6 +287,7 @@ export function AssignmentsView({ userEmail }: AssignmentsViewProps) {
                   const skill = asg.agent_snapshot?.skill || "-";
                   const tier = asg.agent_snapshot?.tier || "Agent";
                   const location = asg.agent_snapshot?.location;
+                  const eid = asg.agent_snapshot?.eid || "-";
 
                   return (
                     <tr
@@ -282,7 +295,10 @@ export function AssignmentsView({ userEmail }: AssignmentsViewProps) {
                       className="hover:bg-slate-50/75 dark:hover:bg-slate-800/40 transition-colors"
                     >
                       <td className="py-3.5 px-4 font-mono font-medium text-slate-700 dark:text-slate-300 whitespace-nowrap">
-                        {asg.date}
+                        {formatTableDate(asg.date)}
+                      </td>
+                      <td className="py-3.5 px-4 font-mono text-slate-600 dark:text-slate-400 whitespace-nowrap">
+                        {eid}
                       </td>
                       <td className="py-3.5 px-4">
                         <div className="font-semibold text-slate-900 dark:text-white">
@@ -309,9 +325,6 @@ export function AssignmentsView({ userEmail }: AssignmentsViewProps) {
                       </td>
                       <td className="py-3.5 px-4 text-slate-600 dark:text-slate-300 whitespace-nowrap">
                         {asg.evaluation_type || "Manual Audit"}
-                      </td>
-                      <td className="py-3.5 px-4 font-mono text-[11px] text-slate-500">
-                        {asg.rubric_id || "RB-2002"}
                       </td>
                       <td className="py-3.5 px-4 whitespace-nowrap">
                         <span
