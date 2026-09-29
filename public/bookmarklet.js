@@ -484,7 +484,7 @@
     };
 
     // --- Direct Gemini API Client ---
-    var callGemini = function(prompt, systemInstruction) {
+    var callGemini = function(prompt, systemInstruction, isJson) {
         if (!GEMINI_API_KEY) {
             showToast("Gemini API Key missing! Set it in ⚙️ Settings", true);
             showSettingsModal();
@@ -495,6 +495,9 @@
         var contents = [{ role: "user", parts: [{ text: prompt }] }];
         var payload = { contents: contents };
         if (systemInstruction) payload.systemInstruction = { parts: [{ text: systemInstruction }] };
+        if (isJson) {
+            payload.generationConfig = { responseMimeType: "application/json" };
+        }
 
         return fetch(url, {
             method: 'POST',
@@ -769,6 +772,342 @@
         wrap.appendChild(iconEl);
         wrap.appendChild(element);
         return wrap;
+    };
+
+    // --- Shared Analysis Results Cache ---
+    var lastAnalysisResult = null;
+
+    // --- Unified Full AI Evaluation Engine ---
+    var executeFullEvaluation = function(opts) {
+        opts = opts || {};
+        var transcript = opts.transcript !== undefined ? opts.transcript : extractTranscript();
+        var subject = opts.subject !== undefined ? opts.subject : ((typeof txtIssue !== 'undefined' && txtIssue) ? txtIssue.value.trim() : "");
+        var description = opts.description !== undefined ? opts.description : "";
+        var notes = opts.notes !== undefined ? opts.notes : "";
+        var perItemOverrides = opts.perItemOverrides || (aiInstructions && aiInstructions.items) || {};
+        var generalInstruction = opts.generalInstruction !== undefined ? opts.generalInstruction : ((aiInstructions && aiInstructions.general) || DEFAULT_GENERAL_INSTRUCTION);
+        var evalTypeVal = (typeof selEvalType !== 'undefined' && selEvalType && selEvalType.value) ? selEvalType.value : "Standard";
+        var isChat = evalTypeVal.toLowerCase().includes("chat");
+
+        if (!transcript && !notes) {
+            showToast("Please provide either a transcript or Advocate Case Notes.", true);
+            return Promise.reject(new Error("No transcript or case notes found"));
+        }
+
+        // Determine target line items based on checkboxes
+        var allKeys = Object.keys(state);
+        if (allKeys.length === 0) {
+            // No rubric loaded: generate summary only
+            var summaryPrompt = "Summarize the customer's main issue or question in 1-2 concise sentences based on this interaction transcript:\n\n" + (transcript || notes);
+            return callGemini(summaryPrompt, "You are a concise QA evaluator. Output ONLY the summary sentence(s).")
+                .then(function(summary){
+                    if (typeof txtIssue !== 'undefined' && txtIssue) {
+                        txtIssue.value = summary;
+                        txtIssue.dispatchEvent(new Event('input'));
+                    }
+                    var res = {
+                        data: { summary: summary, feedbacks: {}, lineItemReconsiderations: {} },
+                        updatedCount: 0,
+                        itemsPayload: []
+                    };
+                    lastAnalysisResult = res;
+                    return res;
+                });
+        }
+
+        var checkedKeys = allKeys.filter(function(k){ return state[k] && state[k].checked; });
+        var targetKeys = checkedKeys.length > 0 ? checkedKeys : allKeys;
+
+        var cleanFbText = function(t) { return (t || "").replace(/\s*Source:[\s\S]*$/i, "").trim(); };
+
+        var itemsPayload = targetKeys.map(function(k){
+            var s = state[k];
+            if (!s) return null;
+            var selOpt = (s.options && s.options[s.selIndex]) ? s.options[s.selIndex] : (s.options && s.options[0]);
+            var draftFb = (s.text || (s.domTextarea && s.domTextarea.value) || "").trim();
+
+            var customFormat = (perItemOverrides[k] && typeof perItemOverrides[k] === 'object' && perItemOverrides[k].value !== undefined)
+                ? perItemOverrides[k].value.trim()
+                : ((typeof perItemOverrides[k] === 'string' ? perItemOverrides[k] : '') || (aiInstructions && aiInstructions.items && aiInstructions.items[k]) || "");
+
+            var optionsSummary = (s.options || []).map(function(o){
+                return o.label + (o.points !== undefined ? " (" + o.points + " pts)" : "");
+            }).join(" | ");
+
+            var optionsDetailed = (s.options || []).map(function(o, optIdx){
+                var genFeedback = globalFeedbackGeneral.find(function(f){
+                    var matchRubric = !f.rubricId || !currentRubric || !currentRubric.id || String(f.rubricId) === String(currentRubric.id);
+                    var matchSec = (f.sectionIndex === s.secIdx || f.section_index === s.secIdx);
+                    var matchItem = (f.itemIndex === s.itemIdx || f.item_index === s.itemIdx);
+                    var matchOpt = (f.optionIndex === optIdx || f.option_index === optIdx);
+                    return matchRubric && matchSec && matchItem && matchOpt;
+                });
+                var optionChips = globalFeedbackTags.filter(function(t){
+                    return (t.sectionIndex === s.secIdx || t.section_index === s.secIdx) &&
+                           (t.itemIndex === s.itemIdx || t.item_index === s.itemIdx) &&
+                           (t.optionIndex === optIdx || t.option_index === optIdx);
+                }).map(function(t){
+                    return cleanFbText(t.feedbackText || t.feedback_text || t.buttonLabel || t.button_label || '');
+                }).filter(Boolean);
+
+                return {
+                    label: o.label,
+                    points: o.points !== undefined ? o.points : 0,
+                    isCorrect: o.isCorrect === true,
+                    guidelineTemplate: genFeedback ? cleanFbText(genFeedback.feedbackText || genFeedback.feedback_text) : "",
+                    availableCoachingChips: optionChips
+                };
+            });
+
+            return {
+                key: k,
+                question: s.question,
+                section: s.sectionName || s.groupName,
+                optionsAvailable: optionsSummary,
+                allRatingOptionsWithGuidelines: optionsDetailed,
+                userSelectedRating: selOpt ? selOpt.label : "N/A",
+                isCorrect: selOpt ? (selOpt.isCorrect === true) : null,
+                draftFeedback: draftFb,
+                itemFormatInstruction: customFormat
+            };
+        }).filter(Boolean);
+
+        var genPrompt = (typeof generalInstruction === 'string' && generalInstruction.trim()) ? generalInstruction.trim() : DEFAULT_GENERAL_INSTRUCTION;
+
+        var fullPrompt = "You are a senior QA Auditor and Feedback Coach for customer support interactions.\n\n" +
+            "=== INTERACTION CONTEXT ===\n" +
+            "Interaction Type: " + (isChat ? "Live Chat (Customer Messaging)" : "Phone Call (Voice Audio Transcript)") + "\n" +
+            "Evaluation Type: " + evalTypeVal + "\n" +
+            "Subject Line: " + (subject || "N/A") + "\n" +
+            "Description: " + (description || "N/A") + "\n" +
+            "Advocate Case Notes:\n" + (notes || "N/A") + "\n\n" +
+            "=== INTERACTION TRANSCRIPT ===\n" + (transcript || "No transcript available.") + "\n\n" +
+            "=== QA RUBRIC MATRIX & EVALUATION STATE ===\n" +
+            JSON.stringify(itemsPayload, null, 2) + "\n\n" +
+            "=== GENERAL INSTRUCTIONS ===\n" + genPrompt + "\n\n" +
+            "=== STRICT GENERATION RULES ===\n" +
+            "1. SUMMARY OF INTERACTION:\n" +
+            "   - summary: 1-2 concise sentences summarizing the customer's core inquiry and resolution.\n" +
+            "2. PROCESSED FEEDBACK PER LINE ITEM (IN 'feedbacks'):\n" +
+            "   - The QA Auditor's userSelectedRating is authoritative for this field.\n" +
+            "   - IF isCorrect is TRUE (or userSelectedRating is 'Quality standard met' / 'Quality standard excelled'):\n" +
+            "     * The processed feedback MUST be positive and affirming, validating what the advocate did well.\n" +
+            "     * FACT-GROUNDING WITHOUT INVENTING SCENARIOS: Always ground the feedback in the true events of the interaction transcript. If the QA marks a standard as met, affirm how the standard was achieved based on real interaction events without inventing or hallucinating scenarios that did not occur.\n" +
+            "     * Rephrase, refine, and enrich the QA's draftFeedback by incorporating specific context from the interaction (customer issue, troubleshooting steps, tool names, reference IDs, cutoff times).\n" +
+            "     * NEVER write negative criticism or contradict the QA's rating direction in this field.\n" +
+            "   - IF isCorrect is FALSE (or userSelectedRating is 'Quality standard missed'):\n" +
+            "     * The processed feedback MUST be constructive coaching, pinpointing the specific gap or missing process.\n" +
+            "     * Incorporate specific details from the interaction.\n" +
+            "   - IF draftFeedback is blank/empty, generate a professional feedback paragraph confirming why the rating standard was achieved or missed according to userSelectedRating and interaction facts.\n" +
+            "   - PARAGRAPH FORMAT: Every feedback entry MUST be written as a complete, cohesive paragraph in professional English. Do NOT use bullet points or meta-prefixes like 'Feedback:'.\n" +
+            "3. AI DISSENTING OBSERVATIONS FOR RECONSIDERATION (IN 'lineItemReconsiderations'):\n" +
+            "   - Perform an independent audit of the interaction transcript and notes against the QA guidelines.\n" +
+            "   - Review all rating options and their coaching guidelines provided under 'allRatingOptionsWithGuidelines'.\n" +
+            "   - If the evidence in the interaction indicates a standard DIFFERENT from the QA's userSelectedRating:\n" +
+            "     * DO NOT replace or contradict the processed feedback in rule 2 (the QA's selected rating remains authoritative for 'feedbacks').\n" +
+            "     * INSTEAD, record your independent finding under that item's key in 'lineItemReconsiderations'. Provide the suggestedRating and detailed reasoning, aligning your reasoning with the official coaching criteria and guideline defined for that suggested option.\n" +
+            "     * If you agree with the QA's rating, do NOT include the item in 'lineItemReconsiderations'.\n\n" +
+            "Return ONLY a strictly valid JSON object matching this schema:\n" +
+            "{\n" +
+            "  \"summary\": \"...\",\n" +
+            "  \"feedbacks\": {\n" +
+            "    \"0:0\": \"...\"\n" +
+            "  },\n" +
+            "  \"lineItemReconsiderations\": {\n" +
+            "    \"0:0\": {\n" +
+            "      \"suggestedRating\": \"Quality standard missed\",\n" +
+            "      \"reasoning\": \"...\"\n" +
+            "    }\n" +
+            "  }\n" +
+            "}";
+
+        return callGemini(fullPrompt, "You are an expert QA evaluation system. Output valid JSON only.", true)
+            .then(function(rawRes){
+                var cleanJsonStr = rawRes.replace(/```json\s*/i, '').replace(/```\s*$/i, '').trim();
+                var data;
+                try {
+                    data = JSON.parse(cleanJsonStr);
+                } catch(jsonErr) {
+                    var jsonMatch = cleanJsonStr.match(/\{[\s\S]*\}/);
+                    if (jsonMatch) data = JSON.parse(jsonMatch[0]);
+                    else throw new Error("Could not parse JSON response from Gemini: " + jsonErr.message);
+                }
+
+                // 1. Auto-copy Summary of Interaction to Issue / Concern
+                if (data.summary && typeof txtIssue !== 'undefined' && txtIssue) {
+                    txtIssue.value = data.summary;
+                    txtIssue.dispatchEvent(new Event('input'));
+                }
+
+                // 2. Update Rubric textareas with processed feedback
+                var updatedCount = 0;
+                if (data.feedbacks && typeof data.feedbacks === 'object') {
+                    Object.keys(data.feedbacks).forEach(function(k){
+                        var newFb = (data.feedbacks[k] || '').trim();
+                        if (newFb && state[k]) {
+                            state[k].text = newFb;
+                            if (state[k].domTextarea) state[k].domTextarea.value = newFb;
+                            if (state[k].refreshUI) state[k].refreshUI();
+                            updatedCount++;
+                        }
+                    });
+                }
+
+                var result = {
+                    data: data,
+                    updatedCount: updatedCount,
+                    itemsPayload: itemsPayload
+                };
+                lastAnalysisResult = result;
+                return result;
+            });
+    };
+
+    // --- Helper to Render Analysis Results into Container ---
+    var renderAnalysisResults = function(container, data, itemsPayload, updatedCount) {
+        if (!container || !data) return;
+        container.innerHTML = "";
+        var resDiv = createElement("div", "display:flex;flex-direction:column;gap:14px;");
+
+        // 1. Summary Card
+        if (data.summary) {
+            var sumCard = createElement("div", "background:#eff6ff;border:1px solid #bfdbfe;border-radius:6px;padding:12px;display:flex;flex-direction:column;gap:6px;");
+            var sumHeader = createElement("div", "display:flex;justify-content:space-between;align-items:center;font-weight:700;color:#1e40af;font-size:12px;");
+            sumHeader.innerHTML = "<span>📋 Summary of Interaction</span>";
+            var btnCopySum = createElement("button", "padding:3px 8px;background:#dcfce7;border:1px solid #86efac;border-radius:4px;font-size:11px;color:#15803d;cursor:pointer;font-weight:600;");
+            btnCopySum.textContent = "Copied to Issue/Concern ✓";
+            addListener(btnCopySum, "click", function(){
+                if (typeof txtIssue !== 'undefined' && txtIssue) {
+                    txtIssue.value = data.summary;
+                    txtIssue.dispatchEvent(new Event('input'));
+                    showToast("Copied to Issue/Concern!", false);
+                }
+            });
+            sumHeader.appendChild(btnCopySum);
+            var sumTxt = createElement("div", "color:#1e293b;font-size:13px;line-height:1.4;");
+            sumTxt.textContent = data.summary;
+            sumCard.appendChild(sumHeader);
+            sumCard.appendChild(sumTxt);
+            resDiv.appendChild(sumCard);
+        }
+
+        // 2. Detailed Line Items Audit & AI Reconsiderations (Grouped by Section)
+        if (itemsPayload && itemsPayload.length > 0) {
+            var reconsiderationsMap = data.lineItemReconsiderations || {};
+            if (Array.isArray(data.reconsiderations)) {
+                data.reconsiderations.forEach(function(r){
+                    if (r.key && !reconsiderationsMap[r.key]) {
+                        reconsiderationsMap[r.key] = {
+                            suggestedRating: r.suggestedRating,
+                            reasoning: r.reasoning
+                        };
+                    }
+                });
+            }
+
+            var secOrder = [];
+            var secGroups = {};
+            itemsPayload.forEach(function(it){
+                var sName = it.section || "General";
+                if (!secGroups[sName]) {
+                    secGroups[sName] = [];
+                    secOrder.push(sName);
+                }
+                secGroups[sName].push(it);
+            });
+
+            secOrder.forEach(function(sName){
+                var secList = secGroups[sName];
+                var secCard = createElement("div", "background:#ffffff;border:1px solid #e2e8f0;border-radius:6px;padding:12px;display:flex;flex-direction:column;gap:10px;margin-bottom:12px;");
+
+                var secHeader = createElement("div", "font-weight:700;color:#1e293b;font-size:13px;display:flex;justify-content:space-between;align-items:center;border-bottom:2px solid #2563eb;padding-bottom:6px;");
+                secHeader.innerHTML = "<span>📁 " + sName + " <span style='font-size:11px;font-weight:normal;color:#64748b;'>(" + secList.length + ")</span></span>";
+                secCard.appendChild(secHeader);
+
+                secList.forEach(function(it, sIdx){
+                    var k = it.key;
+                    var fb = (data.feedbacks && data.feedbacks[k]) ? data.feedbacks[k] : "";
+                    var rec = reconsiderationsMap[k];
+                    var isPos = it.isCorrect !== false && !it.userSelectedRating.toLowerCase().includes("missed");
+
+                    var itBox = createElement("div", "background:#f8fafc;border:1px solid #e2e8f0;border-radius:6px;padding:10px;display:flex;flex-direction:column;gap:6px;");
+
+                    var itTop = createElement("div", "display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap;");
+                    var itTitle = createElement("div", "font-weight:600;font-size:12px;color:#1e293b;");
+                    itTitle.textContent = (sIdx + 1) + ". " + it.question;
+
+                    var badgeStyle = isPos ? "background:#dcfce7;color:#166534;border:1px solid #86efac;" : "background:#fee2e2;color:#991b1b;border:1px solid #fca5a5;";
+                    var itBadge = createElement("span", "font-size:11px;font-weight:600;padding:2px 8px;border-radius:12px;" + badgeStyle);
+                    itBadge.textContent = it.userSelectedRating;
+
+                    itTop.appendChild(itTitle);
+                    itTop.appendChild(itBadge);
+                    itBox.appendChild(itTop);
+
+                    if (fb) {
+                        var fbBox = createElement("div", "font-size:12px;line-height:1.5;color:#334155;background:white;border:1px solid #cbd5e1;border-radius:5px;padding:8px 10px;white-space:pre-wrap;");
+                        fbBox.textContent = fb;
+                        itBox.appendChild(fbBox);
+                    }
+
+                    if (rec && (rec.reasoning || rec.suggestedRating)) {
+                        var recAlert = createElement("div", "background:#fefce8;border:1px solid #fde047;border-radius:5px;padding:8px 10px;display:flex;flex-direction:column;gap:6px;margin-top:2px;");
+
+                        var recAlertHeader = createElement("div", "display:flex;justify-content:space-between;align-items:center;font-size:11px;font-weight:700;color:#854d0e;");
+                        recAlertHeader.innerHTML = "<span>⚠️ AI Observation for Reconsideration</span>";
+                        if (rec.suggestedRating) {
+                            var recSuggBadge = createElement("span", "background:#fef08a;color:#713f12;padding:1px 6px;border-radius:4px;border:1px solid #eab308;font-size:10px;font-weight:700;");
+                            recSuggBadge.textContent = "Suggested: " + rec.suggestedRating;
+                            recAlertHeader.appendChild(recSuggBadge);
+                        }
+                        recAlert.appendChild(recAlertHeader);
+
+                        if (rec.reasoning) {
+                            var recReason = createElement("div", "font-size:11px;color:#713f12;line-height:1.4;");
+                            recReason.textContent = rec.reasoning;
+                            recAlert.appendChild(recReason);
+                        }
+
+                        if (rec.suggestedRating && state[k] && state[k].options) {
+                            var btnApplyRec = createElement("button", "align-self:flex-start;padding:3px 8px;background:#fde047;border:1px solid #ca8a04;border-radius:4px;font-size:11px;color:#713f12;cursor:pointer;font-weight:600;margin-top:2px;");
+                            btnApplyRec.textContent = "Apply \"" + rec.suggestedRating + "\" to Form";
+                            (function(itemKey, suggestedVal){
+                                addListener(btnApplyRec, "click", function(){
+                                    var s = state[itemKey];
+                                    if (!s || !s.options) return;
+                                    var foundOpt = s.options.find(function(o){
+                                        return o.label.toLowerCase().includes(suggestedVal.toLowerCase()) || suggestedVal.toLowerCase().includes(o.label.toLowerCase());
+                                    });
+                                    if (foundOpt) {
+                                        s.sel = foundOpt.id;
+                                        s.selIndex = s.options.indexOf(foundOpt);
+                                        if (s.refreshUI) s.refreshUI();
+                                        updateLiveScore();
+                                        showToast("Applied " + foundOpt.label + " to rubric!", false);
+                                    }
+                                });
+                            })(k, rec.suggestedRating);
+                            recAlert.appendChild(btnApplyRec);
+                        }
+
+                        itBox.appendChild(recAlert);
+                    }
+
+                    secCard.appendChild(itBox);
+                });
+
+                resDiv.appendChild(secCard);
+            });
+        }
+
+        // 3. Processed Feedback Summary
+        if (updatedCount !== undefined && updatedCount > 0) {
+            var fbSummary = createElement("div", "background:#f0fdf4;border:1px solid #bbf7d0;border-radius:6px;padding:10px 12px;font-size:12px;color:#166534;font-weight:600;display:flex;align-items:center;gap:6px;");
+            fbSummary.innerHTML = "<span>✨ Successfully generated and applied targeted feedback to " + updatedCount + " rubric line item(s)!</span>";
+            resDiv.appendChild(fbSummary);
+        }
+
+        container.appendChild(resDiv);
     };
 
     // --- Interaction Checker Modal ---
@@ -1061,6 +1400,9 @@
         var divOutput = createElement("div", "font-size:13px;line-height:1.6;color:#1e293b;user-select:text;overflow:visible;height:auto;");
         var resPlaceholder = createElement("div");
         resPlaceholder.innerHTML = "<div style='color:#94a3b8;font-style:italic;padding:18px;text-align:center;background:#f8fafc;border-radius:6px;border:1px dashed #cbd5e1'>Analysis results and feedback audit will appear here after clicking Generate Analysis...</div>";
+        if (lastAnalysisResult && lastAnalysisResult.data) {
+            renderAnalysisResults(resPlaceholder, lastAnalysisResult.data, lastAnalysisResult.itemsPayload, lastAnalysisResult.updatedCount);
+        }
         divOutput.appendChild(resPlaceholder);
         var outputAccordion = createAccordion("📊 Analysis Results", divOutput, true);
         pBody.appendChild(outputAccordion.container);
@@ -1084,8 +1426,6 @@
             var subject = inpSubject.value.trim();
             var description = inpDescription.value.trim();
             var notes = txtNotes.value.trim();
-            var evalTypeVal = (selEvalType && selEvalType.value) ? selEvalType.value : "Standard";
-            var isChat = evalTypeVal.toLowerCase().includes("chat");
 
             if (!transcript && !notes) {
                 return showToast("Please provide either a transcript or Advocate Case Notes.", true);
@@ -1095,300 +1435,28 @@
             pBtnGen.textContent = "Generating... ⏳";
             resPlaceholder.innerHTML = "<div style='padding:24px;text-align:center;color:#2563eb;font-weight:600;display:flex;flex-direction:column;align-items:center;gap:10px;'><div>🚀 Gemini is evaluating interaction & generating targeted feedback...</div><div style='font-size:12px;color:#64748b;font-weight:normal;'>Processing transcript, case notes, rubric matrix, and formatting instructions in one pass</div></div>";
 
-            // Determine Target Line Items based on Checkboxes
-            var allKeys = Object.keys(state);
-            var checkedKeys = allKeys.filter(function(k){ return state[k] && state[k].checked; });
-            var targetKeys = checkedKeys.length > 0 ? checkedKeys : allKeys;
-
-            var cleanFbText = function(t) { return (t || "").replace(/\s*Source:[\s\S]*$/i, "").trim(); };
-
-            var itemsPayload = targetKeys.map(function(k){
-                var s = state[k];
-                if (!s) return null;
-                var selOpt = (s.options && s.options[s.selIndex]) ? s.options[s.selIndex] : (s.options && s.options[0]);
-                var draftFb = (s.text || (s.domTextarea && s.domTextarea.value) || "").trim();
-                
-                var customFormat = (perItemInputs[k] && perItemInputs[k].value.trim()) || (aiInstructions.items && aiInstructions.items[k]) || "";
-
-                var optionsSummary = (s.options || []).map(function(o){
-                    return o.label + (o.points !== undefined ? " (" + o.points + " pts)" : "");
-                }).join(" | ");
-
-                var optionsDetailed = (s.options || []).map(function(o, optIdx){
-                    var genFeedback = globalFeedbackGeneral.find(function(f){
-                        var matchRubric = !f.rubricId || !currentRubric || !currentRubric.id || String(f.rubricId) === String(currentRubric.id);
-                        var matchSec = (f.sectionIndex === s.secIdx || f.section_index === s.secIdx);
-                        var matchItem = (f.itemIndex === s.itemIdx || f.item_index === s.itemIdx);
-                        var matchOpt = (f.optionIndex === optIdx || f.option_index === optIdx);
-                        return matchRubric && matchSec && matchItem && matchOpt;
-                    });
-                    var optionChips = globalFeedbackTags.filter(function(t){
-                        return (t.sectionIndex === s.secIdx || t.section_index === s.secIdx) &&
-                               (t.itemIndex === s.itemIdx || t.item_index === s.itemIdx) &&
-                               (t.optionIndex === optIdx || t.option_index === optIdx);
-                    }).map(function(t){
-                        return cleanFbText(t.feedbackText || t.feedback_text || t.buttonLabel || t.button_label || '');
-                    }).filter(Boolean);
-
-                    return {
-                        label: o.label,
-                        points: o.points !== undefined ? o.points : 0,
-                        isCorrect: o.isCorrect === true,
-                        guidelineTemplate: genFeedback ? cleanFbText(genFeedback.feedbackText || genFeedback.feedback_text) : "",
-                        availableCoachingChips: optionChips
-                    };
-                });
-
-                return {
-                    key: k,
-                    question: s.question,
-                    section: s.sectionName || s.groupName,
-                    optionsAvailable: optionsSummary,
-                    allRatingOptionsWithGuidelines: optionsDetailed,
-                    userSelectedRating: selOpt ? selOpt.label : "N/A",
-                    isCorrect: selOpt ? (selOpt.isCorrect === true) : null,
-                    draftFeedback: draftFb,
-                    itemFormatInstruction: customFormat
-                };
-            }).filter(Boolean);
-
-            var genPrompt = txtGenInstr.value.trim() || DEFAULT_GENERAL_INSTRUCTION;
-
-            var fullPrompt = "You are a senior QA Auditor and Feedback Coach for customer support interactions.\n\n" +
-                "=== INTERACTION CONTEXT ===\n" +
-                "Interaction Type: " + (isChat ? "Live Chat (Customer Messaging)" : "Phone Call (Voice Audio Transcript)") + "\n" +
-                "Evaluation Type: " + evalTypeVal + "\n" +
-                "Subject Line: " + (subject || "N/A") + "\n" +
-                "Description: " + (description || "N/A") + "\n" +
-                "Advocate Case Notes:\n" + (notes || "N/A") + "\n\n" +
-                "=== INTERACTION TRANSCRIPT ===\n" + (transcript || "No transcript available.") + "\n\n" +
-                "=== QA RUBRIC MATRIX & EVALUATION STATE ===\n" +
-                JSON.stringify(itemsPayload, null, 2) + "\n\n" +
-                "=== GENERAL INSTRUCTIONS ===\n" + genPrompt + "\n\n" +
-                "=== STRICT GENERATION RULES ===\n" +
-                "1. SUMMARY OF INTERACTION:\n" +
-                "   - summary: 1-2 concise sentences summarizing the customer's core inquiry and resolution.\n" +
-                "2. PROCESSED FEEDBACK PER LINE ITEM (IN 'feedbacks'):\n" +
-                "   - The QA Auditor's userSelectedRating is authoritative for this field.\n" +
-                "   - IF isCorrect is TRUE (or userSelectedRating is 'Quality standard met' / 'Quality standard excelled'):\n" +
-                "     * The processed feedback MUST be positive and affirming, validating what the advocate did well.\n" +
-                "     * FACT-GROUNDING WITHOUT INVENTING SCENARIOS: Always ground the feedback in the true events of the interaction transcript. If the QA marks a standard as met, affirm how the standard was achieved based on real interaction events without inventing or hallucinating scenarios that did not occur.\n" +
-                "     * Rephrase, refine, and enrich the QA's draftFeedback by incorporating specific context from the interaction (customer issue, troubleshooting steps, tool names, reference IDs, cutoff times).\n" +
-                "     * NEVER write negative criticism or contradict the QA's rating direction in this field.\n" +
-                "   - IF isCorrect is FALSE (or userSelectedRating is 'Quality standard missed'):\n" +
-                "     * The processed feedback MUST be constructive coaching, pinpointing the specific gap or missing process.\n" +
-                "     * Incorporate specific details from the interaction.\n" +
-                "   - IF draftFeedback is blank/empty, generate a professional feedback paragraph confirming why the rating standard was achieved or missed according to userSelectedRating and interaction facts.\n" +
-                "   - PARAGRAPH FORMAT: Every feedback entry MUST be written as a complete, cohesive paragraph in professional English. Do NOT use bullet points or meta-prefixes like 'Feedback:'.\n" +
-                "3. AI DISSENTING OBSERVATIONS FOR RECONSIDERATION (IN 'lineItemReconsiderations'):\n" +
-                "   - Perform an independent audit of the interaction transcript and notes against the QA guidelines.\n" +
-                "   - Review all rating options and their coaching guidelines provided under 'allRatingOptionsWithGuidelines'.\n" +
-                "   - If the evidence in the interaction indicates a standard DIFFERENT from the QA's userSelectedRating:\n" +
-                "     * DO NOT replace or contradict the processed feedback in rule 2 (the QA's selected rating remains authoritative for 'feedbacks').\n" +
-                "     * INSTEAD, record your independent finding under that item's key in 'lineItemReconsiderations'. Provide the suggestedRating and detailed reasoning, aligning your reasoning with the official coaching criteria and guideline defined for that suggested option.\n" +
-                "     * If you agree with the QA's rating, do NOT include the item in 'lineItemReconsiderations'.\n\n" +
-                "Return ONLY a strictly valid JSON object matching this schema:\n" +
-                "{\n" +
-                "  \"summary\": \"...\",\n" +
-                "  \"feedbacks\": {\n" +
-                "    \"0:0\": \"...\"\n" +
-                "  },\n" +
-                "  \"lineItemReconsiderations\": {\n" +
-                "    \"0:0\": {\n" +
-                "      \"suggestedRating\": \"Quality standard missed\",\n" +
-                "      \"reasoning\": \"...\"\n" +
-                "    }\n" +
-                "  }\n" +
-                "}";
-
-            callGemini(fullPrompt, "You are an expert QA evaluation system. Output valid JSON only.")
-                .then(function(rawRes){
-                    var cleanJsonStr = rawRes.replace(/```json\s*/i, '').replace(/```\s*$/i, '').trim();
-                    var data;
-                    try {
-                        data = JSON.parse(cleanJsonStr);
-                    } catch(jsonErr) {
-                        var jsonMatch = cleanJsonStr.match(/\{[\s\S]*\}/);
-                        if (jsonMatch) data = JSON.parse(jsonMatch[0]);
-                        else throw new Error("Could not parse JSON response from Gemini: " + jsonErr.message);
-                    }
-
-                    // 1. Auto-copy Summary of Interaction to Issue / Concern
-                    if (data.summary && txtIssue) {
-                        txtIssue.value = data.summary;
-                        txtIssue.dispatchEvent(new Event('input'));
-                    }
-
-                    // 2. Update Rubric textareas with processed feedback
-                    var updatedCount = 0;
-                    if (data.feedbacks && typeof data.feedbacks === 'object') {
-                        Object.keys(data.feedbacks).forEach(function(k){
-                            var newFb = (data.feedbacks[k] || '').trim();
-                            if (newFb && state[k]) {
-                                state[k].text = newFb;
-                                if (state[k].domTextarea) state[k].domTextarea.value = newFb;
-                                if (state[k].refreshUI) state[k].refreshUI();
-                                updatedCount++;
-                            }
-                        });
-                    }
-
-                    // 3. Render Rich Analysis Results
-                    resPlaceholder.innerHTML = "";
-                    var resDiv = createElement("div", "display:flex;flex-direction:column;gap:14px;");
-
-                    // Summary Card
-                    if (data.summary) {
-                        var sumCard = createElement("div", "background:#eff6ff;border:1px solid #bfdbfe;border-radius:6px;padding:12px;display:flex;flex-direction:column;gap:6px;");
-                        var sumHeader = createElement("div", "display:flex;justify-content:space-between;align-items:center;font-weight:700;color:#1e40af;font-size:12px;");
-                        sumHeader.innerHTML = "<span>📋 Summary of Interaction</span>";
-                        var btnCopySum = createElement("button", "padding:3px 8px;background:#dcfce7;border:1px solid #86efac;border-radius:4px;font-size:11px;color:#15803d;cursor:pointer;font-weight:600;");
-                        btnCopySum.textContent = "Copied to Issue/Concern ✓";
-                        addListener(btnCopySum, "click", function(){
-                            if (txtIssue) {
-                                txtIssue.value = data.summary;
-                                txtIssue.dispatchEvent(new Event('input'));
-                                showToast("Copied to Issue/Concern!", false);
-                            }
-                        });
-                        sumHeader.appendChild(btnCopySum);
-                        var sumTxt = createElement("div", "color:#1e293b;font-size:13px;line-height:1.4;");
-                        sumTxt.textContent = data.summary;
-                        sumCard.appendChild(sumHeader);
-                        sumCard.appendChild(sumTxt);
-                        resDiv.appendChild(sumCard);
-                    }
-
-                    // Detailed Line Items Audit & AI Reconsiderations (Grouped by Section)
-                    if (itemsPayload && itemsPayload.length > 0) {
-                        var reconsiderationsMap = data.lineItemReconsiderations || {};
-                        if (Array.isArray(data.reconsiderations)) {
-                            data.reconsiderations.forEach(function(r){
-                                if (r.key && !reconsiderationsMap[r.key]) {
-                                    reconsiderationsMap[r.key] = {
-                                        suggestedRating: r.suggestedRating,
-                                        reasoning: r.reasoning
-                                    };
-                                }
-                            });
-                        }
-
-                        // Group items by Section
-                        var secOrder = [];
-                        var secGroups = {};
-                        itemsPayload.forEach(function(it){
-                            var sName = it.section || "General";
-                            if (!secGroups[sName]) {
-                                secGroups[sName] = [];
-                                secOrder.push(sName);
-                            }
-                            secGroups[sName].push(it);
-                        });
-
-                        secOrder.forEach(function(sName){
-                            var secList = secGroups[sName];
-                            var secCard = createElement("div", "background:#ffffff;border:1px solid #e2e8f0;border-radius:6px;padding:12px;display:flex;flex-direction:column;gap:10px;margin-bottom:12px;");
-                            
-                            var secHeader = createElement("div", "font-weight:700;color:#1e293b;font-size:13px;display:flex;justify-content:space-between;align-items:center;border-bottom:2px solid #2563eb;padding-bottom:6px;");
-                            secHeader.innerHTML = "<span>📁 " + sName + " <span style='font-size:11px;font-weight:normal;color:#64748b;'>(" + secList.length + ")</span></span>";
-                            secCard.appendChild(secHeader);
-
-                            secList.forEach(function(it, sIdx){
-                                var k = it.key;
-                                var fb = (data.feedbacks && data.feedbacks[k]) ? data.feedbacks[k] : "";
-                                var rec = reconsiderationsMap[k];
-                                var isPos = it.isCorrect !== false && !it.userSelectedRating.toLowerCase().includes("missed");
-
-                                var itBox = createElement("div", "background:#f8fafc;border:1px solid #e2e8f0;border-radius:6px;padding:10px;display:flex;flex-direction:column;gap:6px;");
-                                
-                                var itTop = createElement("div", "display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap;");
-                                var itTitle = createElement("div", "font-weight:600;font-size:12px;color:#1e293b;");
-                                itTitle.textContent = (sIdx + 1) + ". " + it.question;
-                                
-                                var badgeStyle = isPos ? "background:#dcfce7;color:#166534;border:1px solid #86efac;" : "background:#fee2e2;color:#991b1b;border:1px solid #fca5a5;";
-                                var itBadge = createElement("span", "font-size:11px;font-weight:600;padding:2px 8px;border-radius:12px;" + badgeStyle);
-                                itBadge.textContent = it.userSelectedRating;
-                                
-                                itTop.appendChild(itTitle);
-                                itTop.appendChild(itBadge);
-                                itBox.appendChild(itTop);
-
-                                if (fb) {
-                                    var fbBox = createElement("div", "font-size:12px;line-height:1.5;color:#334155;background:white;border:1px solid #cbd5e1;border-radius:5px;padding:8px 10px;white-space:pre-wrap;");
-                                    fbBox.textContent = fb;
-                                    itBox.appendChild(fbBox);
-                                }
-
-                                if (rec && (rec.reasoning || rec.suggestedRating)) {
-                                    var recAlert = createElement("div", "background:#fefce8;border:1px solid #fde047;border-radius:5px;padding:8px 10px;display:flex;flex-direction:column;gap:6px;margin-top:2px;");
-                                    
-                                    var recAlertHeader = createElement("div", "display:flex;justify-content:space-between;align-items:center;font-size:11px;font-weight:700;color:#854d0e;");
-                                    recAlertHeader.innerHTML = "<span>⚠️ AI Observation for Reconsideration</span>";
-                                    if (rec.suggestedRating) {
-                                        var recSuggBadge = createElement("span", "background:#fef08a;color:#713f12;padding:1px 6px;border-radius:4px;border:1px solid #eab308;font-size:10px;font-weight:700;");
-                                        recSuggBadge.textContent = "Suggested: " + rec.suggestedRating;
-                                        recAlertHeader.appendChild(recSuggBadge);
-                                    }
-                                    recAlert.appendChild(recAlertHeader);
-
-                                    if (rec.reasoning) {
-                                        var recReason = createElement("div", "font-size:11px;color:#713f12;line-height:1.4;");
-                                        recReason.textContent = rec.reasoning;
-                                        recAlert.appendChild(recReason);
-                                    }
-
-                                    if (rec.suggestedRating && state[k] && state[k].options) {
-                                        var btnApplyRec = createElement("button", "align-self:flex-start;padding:3px 8px;background:#fde047;border:1px solid #ca8a04;border-radius:4px;font-size:11px;color:#713f12;cursor:pointer;font-weight:600;margin-top:2px;");
-                                        btnApplyRec.textContent = "Apply \"" + rec.suggestedRating + "\" to Form";
-                                        (function(itemKey, suggestedVal){
-                                            addListener(btnApplyRec, "click", function(){
-                                                var s = state[itemKey];
-                                                if (!s || !s.options) return;
-                                                var foundOpt = s.options.find(function(o){
-                                                    return o.label.toLowerCase().includes(suggestedVal.toLowerCase()) || suggestedVal.toLowerCase().includes(o.label.toLowerCase());
-                                                });
-                                                if (foundOpt) {
-                                                    s.sel = foundOpt.id;
-                                                    s.selIndex = s.options.indexOf(foundOpt);
-                                                    if (s.refreshUI) s.refreshUI();
-                                                    updateLiveScore();
-                                                    showToast("Applied " + foundOpt.label + " to rubric!", false);
-                                                }
-                                            });
-                                        })(k, rec.suggestedRating);
-                                        recAlert.appendChild(btnApplyRec);
-                                    }
-
-                                    itBox.appendChild(recAlert);
-                                }
-
-                                secCard.appendChild(itBox);
-                            });
-
-                            resDiv.appendChild(secCard);
-                        });
-                    }
-
-                    // Processed Feedback Summary
-                    if (updatedCount > 0) {
-                        var fbSummary = createElement("div", "background:#f0fdf4;border:1px solid #bbf7d0;border-radius:6px;padding:10px 12px;font-size:12px;color:#166534;font-weight:600;display:flex;align-items:center;gap:6px;");
-                        fbSummary.innerHTML = "<span>✨ Successfully generated and applied targeted feedback to " + updatedCount + " rubric line item(s)!</span>";
-                        resDiv.appendChild(fbSummary);
-                    }
-
-                    resPlaceholder.appendChild(resDiv);
-                    showToast("Analysis complete! Updated " + updatedCount + " line item(s).", false);
-                    inputAccordion.body.style.display = "none";
-                    inputAccordion.container.firstChild.lastChild.textContent = "▼";
-                })
-                .catch(function(err){
-                    resPlaceholder.innerHTML = "<div style='color:#ef4444;padding:15px;text-align:center'>❌ " + err.message + "</div>";
-                    showToast("Analysis error: " + err.message, true);
-                })
-                .finally(function(){
-                    pBtnGen.disabled = false;
-                    pBtnGen.textContent = "Generate Analysis";
-                });
+            executeFullEvaluation({
+                transcript: transcript,
+                subject: subject,
+                description: description,
+                notes: notes,
+                perItemOverrides: perItemInputs,
+                generalInstruction: txtGenInstr.value.trim()
+            })
+            .then(function(result){
+                renderAnalysisResults(resPlaceholder, result.data, result.itemsPayload, result.updatedCount);
+                showToast("Analysis complete! Updated " + result.updatedCount + " line item(s).", false);
+                inputAccordion.body.style.display = "none";
+                inputAccordion.container.firstChild.lastChild.textContent = "▼";
+            })
+            .catch(function(err){
+                resPlaceholder.innerHTML = "<div style='color:#ef4444;padding:15px;text-align:center'>❌ " + err.message + "</div>";
+                showToast("Analysis error: " + err.message, true);
+            })
+            .finally(function(){
+                pBtnGen.disabled = false;
+                pBtnGen.textContent = "Generate Analysis";
+            });
         });
 
         pFooter.appendChild(pBtnGen);
@@ -1573,17 +1641,47 @@
 
     var btnSummary = createElement("span");
     btnSummary.textContent = "✨";
-    btnSummary.title = "Generate Summary from Transcript using Gemini AI";
-    btnSummary.style.cssText = "position:absolute;right:10px;top:9px;cursor:pointer;font-size:15px;opacity:0.7;user-select:none;z-index:5;";
+    btnSummary.title = "✨ Click: Full AI Evaluation (Issue Summary + Line-Item Feedback)\nRight-click: Summary only";
+    btnSummary.style.cssText = "position:absolute;right:10px;top:9px;cursor:pointer;font-size:15px;opacity:0.75;user-select:none;z-index:5;transition:transform 0.15s, opacity 0.15s;";
 
     wrapIssue.appendChild(icoIssue);
     wrapIssue.appendChild(txtIssue);
     wrapIssue.appendChild(btnSummary);
     headerFieldsContainer.appendChild(wrapIssue);
 
-    addListener(btnSummary, "mouseenter", function(){ btnSummary.style.opacity = "1"; });
-    addListener(btnSummary, "mouseleave", function(){ btnSummary.style.opacity = "0.7"; });
+    addListener(btnSummary, "mouseenter", function(){ btnSummary.style.opacity = "1"; btnSummary.style.transform = "scale(1.15)"; });
+    addListener(btnSummary, "mouseleave", function(){ btnSummary.style.opacity = "0.75"; btnSummary.style.transform = "scale(1)"; });
+
+    // Left-click: Run Full AI Evaluation (populates summary AND all line-item feedbacks)
     addListener(btnSummary, "click", function(e){
+        e.stopPropagation();
+        var origIcon = btnSummary.textContent;
+        btnSummary.textContent = "⏳";
+        btnSummary.style.cursor = "wait";
+
+        executeFullEvaluation({
+            transcript: extractTranscript(),
+            subject: txtIssue ? txtIssue.value.trim() : ""
+        })
+        .then(function(res){
+            if (res.updatedCount > 0) {
+                showToast("✨ AI Evaluation complete! Updated summary & " + res.updatedCount + " line item(s).", false);
+            } else {
+                showToast("Summary generated with Gemini!", false);
+            }
+        })
+        .catch(function(err){
+            showToast("AI Evaluation failed: " + err.message, true);
+        })
+        .finally(function(){
+            btnSummary.textContent = origIcon;
+            btnSummary.style.cursor = "pointer";
+        });
+    });
+
+    // Right-click: Summary only (without modifying line items)
+    addListener(btnSummary, "contextmenu", function(e){
+        e.preventDefault();
         e.stopPropagation();
         var transcript = extractTranscript();
         if(!transcript) return showToast("No transcript found on page.", true);
