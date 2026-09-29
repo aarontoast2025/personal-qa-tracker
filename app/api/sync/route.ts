@@ -131,10 +131,9 @@ export async function POST(request: Request) {
       }
 
       await supabase.from("sync_logs").insert({
-        user_email: user?.email || "system",
+        user_id: user?.id || null,
         target_table: "all",
-        operation: "seed-csv",
-        rows_affected: Object.values(results).reduce((a, b) => a + b, 0),
+        rows_synced: Object.values(results).reduce((a, b) => a + b, 0),
         status: "success",
         completed_at: new Date().toISOString(),
       });
@@ -215,10 +214,9 @@ export async function POST(request: Request) {
     }
 
     await supabase.from("sync_logs").insert({
-      user_email: user?.email || "system",
+      user_id: user?.id || null,
       target_table: "google_sheet",
-      operation: "pull",
-      rows_affected: Object.values(results).reduce((a, b) => a + b, 0),
+      rows_synced: Object.values(results).reduce((a, b) => a + b, 0),
       status: "success",
       completed_at: new Date().toISOString(),
     });
