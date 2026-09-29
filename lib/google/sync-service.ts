@@ -71,7 +71,7 @@ export async function syncAgents(
 
   const { error } = await supabase
     .from("agents")
-    .upsert(records, { onConflict: "eid" });
+    .upsert(records, { onConflict: "eid", ignoreDuplicates: true });
 
   if (error) {
     console.error("Error syncing agents:", error);
@@ -106,7 +106,7 @@ export async function syncAssignments(
 
   const { error } = await supabase
     .from("assignments")
-    .upsert(records, { onConflict: "id" });
+    .upsert(records, { onConflict: "id", ignoreDuplicates: true });
 
   if (error) {
     console.error("Error syncing assignments:", error);
@@ -174,7 +174,7 @@ export async function syncEvaluations(
 
   const { error } = await supabase
     .from("evaluations")
-    .upsert(records, { onConflict: "interaction_id" });
+    .upsert(records, { onConflict: "interaction_id", ignoreDuplicates: true });
 
   if (error) {
     console.error("Error syncing evaluations:", error);
@@ -207,7 +207,7 @@ export async function syncRubrics(
 
   const { error } = await supabase
     .from("rubrics")
-    .upsert(records, { onConflict: "id" });
+    .upsert(records, { onConflict: "id", ignoreDuplicates: true });
 
   if (error) {
     console.error("Error syncing rubrics:", error);
@@ -237,7 +237,7 @@ export async function syncRubricDescriptions(
 
   const { error } = await supabase
     .from("rubric_descriptions")
-    .upsert(records, { onConflict: "id" });
+    .upsert(records, { onConflict: "id", ignoreDuplicates: true });
 
   if (error) {
     console.error("Error syncing rubric descriptions:", error);
@@ -271,7 +271,7 @@ export async function syncFeedbackTemplates(
 
   const { error } = await supabase
     .from("feedback_templates")
-    .upsert(records, { onConflict: "id" });
+    .upsert(records, { onConflict: "id", ignoreDuplicates: true });
 
   if (error) {
     console.error("Error syncing feedback templates:", error);
