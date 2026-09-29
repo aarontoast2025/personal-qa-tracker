@@ -12,6 +12,7 @@ export default async function SettingsPage() {
     { count: evaluationsCount },
     { count: agentsCount },
     { data: settings },
+    { data: userData },
   ] = await Promise.all([
     supabase.from("rubrics").select("*", { count: "exact", head: true }),
     supabase.from("feedback_templates").select("*", { count: "exact", head: true }),
@@ -24,7 +25,22 @@ export default async function SettingsPage() {
       .select("google_sheet_id, gemini_api_key")
       .limit(1)
       .maybeSingle(),
+    supabase.auth.getUser(),
   ]);
+
+  const user = userData?.user;
+  const userEmail = user?.email || "";
+  const userMeta = user?.user_metadata || {};
+  const rawName = userMeta.full_name || userMeta.name || "";
+  const userName =
+    rawName ||
+    (userEmail
+      ? userEmail
+          .split("@")[0]
+          .split(".")
+          .map((p: string) => p.charAt(0).toUpperCase() + p.slice(1))
+          .join(" ")
+      : "");
 
   return (
     <div className="space-y-6">
@@ -40,6 +56,8 @@ export default async function SettingsPage() {
       <SettingsForm
         initialSheetId={settings?.google_sheet_id || ""}
         initialGeminiKey={settings?.gemini_api_key || ""}
+        userEmail={userEmail}
+        userName={userName}
         initialCounts={{
           rubrics: rubricsCount || 0,
           feedbackTemplates: feedbackTemplatesCount || 0,

@@ -66,12 +66,16 @@ export async function GET(request: Request) {
       };
     });
 
-    // Derive QA Name from email or profile
+    // Derive QA Name from explicit query parameter or email
+    const reqName = searchParams.get("qa_name");
     const emailNamePart = qaEmail.split("@")[0] || "Evaluator";
-    const qaDisplayName = emailNamePart
-      .split(".")
-      .map((p) => p.charAt(0).toUpperCase() + p.slice(1))
-      .join(" ");
+    const qaDisplayName =
+      reqName && reqName.trim()
+        ? reqName.trim()
+        : emailNamePart
+            .split(".")
+            .map((p) => p.charAt(0).toUpperCase() + p.slice(1))
+            .join(" ");
 
     const evalTypes = [
       "Manual Audit",

@@ -18,11 +18,14 @@ import {
   BookOpen,
   MessageSquareQuote,
   RefreshCw,
+  User,
 } from "lucide-react";
 
 interface SettingsFormProps {
   initialSheetId: string;
   initialGeminiKey?: string;
+  userEmail?: string;
+  userName?: string;
   initialCounts?: {
     rubrics: number;
     feedbackTemplates: number;
@@ -36,10 +39,13 @@ interface SettingsFormProps {
 export function SettingsForm({
   initialSheetId,
   initialGeminiKey = "",
+  userEmail = "",
+  userName = "",
   initialCounts,
 }: SettingsFormProps) {
   const [sheetId, setSheetId] = useState(initialSheetId);
   const [geminiKey, setGeminiKey] = useState(initialGeminiKey);
+  const [origin, setOrigin] = useState("https://personal-qa-tracker.vercel.app");
   const [counts, setCounts] = useState(
     initialCounts || {
       rubrics: 0,
@@ -61,7 +67,15 @@ export function SettingsForm({
     text: string;
   } | null>(null);
 
-  const bookmarkletCode = `javascript:(function(){var s=document.createElement('script');s.src='https://personal-qa-tracker.vercel.app/bookmarklet.js?t='+Date.now();document.body.appendChild(s);})();`;
+  useEffect(() => {
+    if (typeof window !== "undefined" && window.location.origin) {
+      setOrigin(window.location.origin);
+    }
+  }, []);
+
+  const emailParam = userEmail ? `email=${encodeURIComponent(userEmail)}&` : "";
+  const nameParam = userName ? `name=${encodeURIComponent(userName)}&` : "";
+  const bookmarkletCode = `javascript:(function(){var s=document.createElement('script');s.src='${origin}/bookmarklet.js?${emailParam}${nameParam}t='+Date.now();document.body.appendChild(s);})();`;
   const bookmarkletRef = useRef<HTMLAnchorElement>(null);
 
   useEffect(() => {
@@ -428,6 +442,20 @@ export function SettingsForm({
 
         <div className="space-y-4 text-xs">
           <div className="p-4 rounded-xl bg-slate-50 dark:bg-slate-800/60 border border-slate-200 dark:border-slate-700">
+            {userEmail && (
+              <div className="mb-3.5 px-3 py-2 rounded-lg bg-amber-500/10 border border-amber-500/20 flex items-center justify-between text-[11px]">
+                <div className="flex items-center gap-1.5 text-amber-900 dark:text-amber-200 font-medium">
+                  <User className="w-3.5 h-3.5 text-amber-600 dark:text-amber-400" />
+                  <span>
+                    Linked to: <strong>{userEmail}</strong> {userName ? `(${userName})` : ""}
+                  </span>
+                </div>
+                <span className="text-[10px] text-amber-700 dark:text-amber-300 bg-amber-500/20 px-2 py-0.5 rounded font-semibold">
+                  Pre-configured
+                </span>
+              </div>
+            )}
+
             <div className="font-semibold text-slate-800 dark:text-slate-200 mb-2">
               Quick Installation:
             </div>

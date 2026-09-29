@@ -2,10 +2,57 @@
     if (document.getElementById('qa-modal-overlay')) return;
     console.log("Toast QA Tracker: Initializing...");
 
+    // Extract parameters and host from script tag URL
+    var currentScriptSrc = (function() {
+        if (document.currentScript && document.currentScript.src) {
+            return document.currentScript.src;
+        }
+        var scripts = document.getElementsByTagName('script');
+        for (var i = scripts.length - 1; i >= 0; i--) {
+            if (scripts[i].src && scripts[i].src.indexOf('bookmarklet.js') !== -1) {
+                return scripts[i].src;
+            }
+        }
+        return '';
+    })();
+
+    var scriptParams = {};
+    if (currentScriptSrc && currentScriptSrc.indexOf('?') !== -1) {
+        try {
+            var qs = currentScriptSrc.split('?')[1].split('#')[0];
+            qs.split('&').forEach(function(pair) {
+                var parts = pair.split('=');
+                if (parts.length >= 2) {
+                    var k = decodeURIComponent(parts[0]);
+                    var v = decodeURIComponent(parts.slice(1).join('=').replace(/\+/g, ' '));
+                    scriptParams[k] = v;
+                }
+            });
+        } catch(e) {}
+    }
+
+    var formatEmailToName = function(email) {
+        if (!email) return "";
+        var namePart = String(email).split('@')[0];
+        return namePart.split('.').map(function(part){
+            return part.charAt(0).toUpperCase() + part.slice(1);
+        }).join(' ');
+    };
+
     // Default configuration
-    var DEFAULT_TRACKER_HOST = (typeof window !== 'undefined' && (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1'))
-        ? window.location.origin
-        : 'https://personal-qa-tracker.vercel.app';
+    var DEFAULT_TRACKER_HOST = (function() {
+        if (currentScriptSrc) {
+            try {
+                var parsedUrl = new URL(currentScriptSrc);
+                if (parsedUrl.origin && parsedUrl.origin.indexOf('http') === 0) {
+                    return parsedUrl.origin;
+                }
+            } catch(e) {}
+        }
+        return (typeof window !== 'undefined' && (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1'))
+            ? window.location.origin
+            : 'https://personal-qa-tracker.vercel.app';
+    })();
     var DEFAULT_API_URL = DEFAULT_TRACKER_HOST + '/api/bookmarklet';
     var DEFAULT_API_TOKEN = 'toast_qa_bookmarklet_2026';
     var DEFAULT_GEMINI_MODEL = 'gemini-2.5-flash';
@@ -300,7 +347,11 @@
         });
     };
     var DEFAULT_QA_EMAIL = 'aaron.toast2025@gmail.com';
-    var QA_EMAIL = storage.get('qa_email', DEFAULT_QA_EMAIL);
+    var passedEmail = (scriptParams.email || '').trim();
+    var QA_EMAIL = passedEmail || storage.get('qa_email', DEFAULT_QA_EMAIL);
+    if (passedEmail) {
+        storage.set('qa_email', QA_EMAIL);
+    }
     var GEMINI_API_KEY = storage.get('gemini_key', '');
     var GEMINI_MODEL = storage.get('gemini_model', DEFAULT_GEMINI_MODEL);
 
@@ -321,7 +372,14 @@
         if (rawStored) storedModels = JSON.parse(rawStored);
     } catch(e) {}
     var globalGeminiModels = (Array.isArray(storedModels) && storedModels.length > 0) ? storedModels : DEFAULT_GEMINI_MODELS.slice();
-    var currentQaDisplayName = storage.get('qa_name', '');
+    var passedName = (scriptParams.name || '').trim();
+    var currentQaDisplayName = passedName || storage.get('qa_name', '');
+    if (passedName) {
+        storage.set('qa_name', currentQaDisplayName);
+    } else if (QA_EMAIL && !currentQaDisplayName) {
+        currentQaDisplayName = formatEmailToName(QA_EMAIL);
+        storage.set('qa_name', currentQaDisplayName);
+    }
     var qaFirstName = currentQaDisplayName ? currentQaDisplayName.split(' ')[0] : "";
     var existingRecordId = null;
     var DEFAULT_GENERAL_INSTRUCTION = "Write feedback in concise, objective, and action-oriented paragraphs. Each feedback must be written as a complete paragraph in professional English. Incorporate specific context from the interaction (e.g. customer statements, troubleshooting steps, tool names, reference IDs, cutoff times). Rephrase and enrich the QA's draft feedback while strictly preserving the QA's rating direction (e.g. met, excelled, or missed). Always ground the feedback in what actually occurred in the interaction without inventing or hallucinating scenarios. If the QA marks a standard as met, affirm how the standard was achieved based on real interaction events. Never include meta-instructions, prefixes like 'Feedback:', or mention formatting guidelines in the output.";
@@ -3937,13 +3995,14 @@
 
         // Try Next.js Tracker API init first for high-speed bundled data
         if (trackerApiUrl && trackerApiUrl.indexOf('/api/bookmarklet') !== -1) {
-            apiGet(trackerApiUrl + '/init', { qa_email: targetQaEmail })
+            apiGet(trackerApiUrl + '/init', { qa_email: targetQaEmail, qa_name: currentQaDisplayName })
                 .then(function(data){
                     if (data && data.success) {
                         if (data.qa_name) {
                             currentQaDisplayName = data.qa_name;
                             qaFirstName = data.qa_name.split(' ')[0];
                             storage.set('qa_name', data.qa_name);
+                            updateHeaderTitle();
                         }
                         if (data.qa_email) {
                             QA_EMAIL = data.qa_email;
