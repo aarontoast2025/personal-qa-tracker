@@ -1066,26 +1066,7 @@
         pBody.appendChild(outputAccordion.container);
 
         // Footer
-        var pFooter = createElement("div", sFooter + "; flex-shrink:0; display:flex; justify-content:space-between; align-items:center;");
-
-        // Model Selector Container in AI drawer
-        var modelSelectWrap = createElement("div", "display:flex; align-items:center; gap:6px; font-size:12px; font-weight:600; color:#475569;");
-        modelSelectWrap.innerHTML = "<span>🤖 Model:</span>";
-        var selModelInModal = createElement("select", "padding:4px 8px; border:1px solid #cbd5e1; border-radius:5px; font-size:12px; background:white; font-family:inherit; color:#1e293b; cursor:pointer; font-weight:500; outline:none;");
-        ['gemini-2.5-flash', 'gemini-2.5-pro', 'gemini-1.5-flash', 'gemini-1.5-pro'].forEach(function(m){
-            var opt = createElement("option");
-            opt.value = m;
-            opt.textContent = m;
-            if (m === (GEMINI_MODEL || DEFAULT_GEMINI_MODEL)) opt.selected = true;
-            selModelInModal.appendChild(opt);
-        });
-        addListener(selModelInModal, "change", function(){
-            GEMINI_MODEL = selModelInModal.value;
-            storage.set('gemini_model', GEMINI_MODEL);
-            showToast("Gemini model set to " + GEMINI_MODEL, false);
-        });
-        modelSelectWrap.appendChild(selModelInModal);
-        pFooter.appendChild(modelSelectWrap);
+        var pFooter = createElement("div", sFooter + "; flex-shrink:0; display:flex; justify-content:flex-end; align-items:center;");
 
         var pFooterRight = createElement("div", "display:flex; align-items:center; gap:8px;");
         var pBtnCancel = createElement("button", sBtnCancel);
@@ -1787,6 +1768,84 @@
         updateLiveScore();
     };
 
+    // --- DOM Interaction & Button Matching Helpers ---
+    var findGroupContainer = function(name) {
+        if (!name) return null;
+        var h2s = Array.from(document.querySelectorAll('h2'));
+        var h2 = h2s.find(function(el){ return el.textContent.trim().toLowerCase().includes(name.toLowerCase()); });
+        return h2 ? (h2.closest('.padding-xlarge') || h2.closest('.stella-section-card') || h2.parentElement) : null;
+    };
+
+    var findMatchingTargetButton = function(buttons, selectedOption, fallbackIndex) {
+        if (!buttons || buttons.length === 0) return null;
+        var optLabel = selectedOption ? (selectedOption.label || selectedOption.text || '').trim().toLowerCase() : '';
+        if (optLabel) {
+            // 1. Exact match (case-insensitive, trimmed)
+            for (var b = 0; b < buttons.length; b++) {
+                var btnText = (buttons[b].textContent || '').trim().toLowerCase();
+                if (btnText === optLabel) {
+                    return buttons[b];
+                }
+            }
+            // 2. Normalized alphanumeric match (removes punctuation, symbols)
+            var normOpt = optLabel.replace(/[^a-z0-9]/g, '');
+            if (normOpt) {
+                for (var b = 0; b < buttons.length; b++) {
+                    var normBtn = (buttons[b].textContent || '').toLowerCase().replace(/[^a-z0-9]/g, '');
+                    if (normBtn === normOpt) {
+                        return buttons[b];
+                    }
+                }
+            }
+            // 3. Substring match
+            for (var b = 0; b < buttons.length; b++) {
+                var bText = (buttons[b].textContent || '').toLowerCase().trim();
+                if (bText && (bText.indexOf(optLabel) !== -1 || optLabel.indexOf(bText) !== -1)) {
+                    return buttons[b];
+                }
+            }
+        }
+        // 4. Fallback to index if label matching fails
+        if (fallbackIndex !== undefined && buttons[fallbackIndex]) {
+            return buttons[fallbackIndex];
+        }
+        return buttons[0] || null;
+    };
+
+    var syncSingleItemToPage = function(s) {
+        if (!s) return;
+        try {
+            var container = findGroupContainer(s.groupName);
+            if (!container) return;
+            var question = container.querySelector('[data-idx="' + s.itemId + '"]');
+            if (!question) return;
+
+            var selectedOpt = (s.options && s.options.find(function(o){ return o.id === s.sel; })) || (s.options && s.options[s.selIndex]);
+
+            var control = question.querySelector('[data-testid="SegmentedControl"]');
+            if (control) {
+                var buttons = Array.from(control.querySelectorAll('button'));
+                var matchedBtn = findMatchingTargetButton(buttons, selectedOpt, s.selIndex);
+                if (matchedBtn) {
+                    matchedBtn.click();
+                }
+            } else {
+                var sel = question.querySelector('select');
+                if (sel) {
+                    var optLabel = selectedOpt ? (selectedOpt.label || selectedOpt.text || '').trim().toLowerCase() : '';
+                    var opts = Array.from(sel.options);
+                    var matchedOpt = opts.find(function(o){ return o.text.trim().toLowerCase() === optLabel; }) || opts[s.selIndex];
+                    if (matchedOpt) {
+                        sel.value = matchedOpt.value;
+                        sel.dispatchEvent(new Event('change', { bubbles: true }));
+                    }
+                }
+            }
+        } catch(e) {
+            console.warn("Live sync error:", e);
+        }
+    };
+
     // --- Form Rendering by Rubric Object ---
     var renderRubric = function(rubricData, feedbackChips, feedbackGeneral) {
         contentContainer.querySelectorAll('.rubric-section').forEach(function(el){ el.remove(); });
@@ -1975,6 +2034,7 @@
                         updateHeaderBg();
                         updateText(key);
                         updateLiveScore();
+                        syncSingleItemToPage(state[key]);
                     });
 
                     updateSelectStyles();
@@ -1995,6 +2055,7 @@
                             updateHeaderBg();
                             updateText(key);
                             updateLiveScore();
+                            syncSingleItemToPage(state[key]);
                         });
 
                         btnGroup.appendChild(btn);
@@ -2988,12 +3049,6 @@
     });
 
     // --- DOM Interaction & Generation ---
-    var findGroupContainer = function(name) {
-        var h2s = Array.from(document.querySelectorAll('h2'));
-        var h2 = h2s.find(function(el){ return el.textContent.trim().toLowerCase().includes(name.toLowerCase()); });
-        return h2 ? h2.closest('.padding-xlarge') : null;
-    };
-
     var handleGeneration = function(saveToDb) {
         if (!selectedAssignmentId && (!selAgent || !selAgent.value)) {
             showToast("Please select an Agent first!", true);
@@ -3056,10 +3111,23 @@
             if(container) {
                 var question = container.querySelector('[data-idx="' + s.itemId + '"]');
                 if(question) {
+                    var selectedOpt = (s.options && s.options.find(function(o){ return o.id === s.sel; })) || (s.options && s.options[s.selIndex]);
                     var control = question.querySelector('[data-testid="SegmentedControl"]');
                     if(control) {
                         var buttons = Array.from(control.querySelectorAll('button'));
-                        if(buttons[s.selIndex]) buttons[s.selIndex].click();
+                        var matchedBtn = findMatchingTargetButton(buttons, selectedOpt, s.selIndex);
+                        if(matchedBtn) matchedBtn.click();
+                    } else {
+                        var sel = question.querySelector('select');
+                        if (sel) {
+                            var optLabel = selectedOpt ? (selectedOpt.label || selectedOpt.text || '').trim().toLowerCase() : '';
+                            var opts = Array.from(sel.options);
+                            var matchedOpt = opts.find(function(o){ return o.text.trim().toLowerCase() === optLabel; }) || opts[s.selIndex];
+                            if (matchedOpt) {
+                                sel.value = matchedOpt.value;
+                                sel.dispatchEvent(new Event('change', { bubbles: true }));
+                            }
+                        }
                     }
 
                     setTimeout(function(){
