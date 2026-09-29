@@ -4,11 +4,27 @@ import { SettingsForm } from "@/components/settings/settings-form";
 export default async function SettingsPage() {
   const supabase = await createClient();
 
-  const { data: settings } = await supabase
-    .from("app_settings")
-    .select("google_sheet_id, gemini_api_key")
-    .limit(1)
-    .maybeSingle();
+  const [
+    { count: rubricsCount },
+    { count: feedbackTemplatesCount },
+    { count: rubricDescriptionsCount },
+    { count: assignmentsCount },
+    { count: evaluationsCount },
+    { count: agentsCount },
+    { data: settings },
+  ] = await Promise.all([
+    supabase.from("rubrics").select("*", { count: "exact", head: true }),
+    supabase.from("feedback_templates").select("*", { count: "exact", head: true }),
+    supabase.from("rubric_descriptions").select("*", { count: "exact", head: true }),
+    supabase.from("assignments").select("*", { count: "exact", head: true }),
+    supabase.from("evaluations").select("*", { count: "exact", head: true }),
+    supabase.from("agents").select("*", { count: "exact", head: true }),
+    supabase
+      .from("app_settings")
+      .select("google_sheet_id, gemini_api_key")
+      .limit(1)
+      .maybeSingle(),
+  ]);
 
   return (
     <div className="space-y-6">
@@ -24,6 +40,14 @@ export default async function SettingsPage() {
       <SettingsForm
         initialSheetId={settings?.google_sheet_id || ""}
         initialGeminiKey={settings?.gemini_api_key || ""}
+        initialCounts={{
+          rubrics: rubricsCount || 0,
+          feedbackTemplates: feedbackTemplatesCount || 0,
+          rubricDescriptions: rubricDescriptionsCount || 0,
+          assignments: assignmentsCount || 0,
+          evaluations: evaluationsCount || 0,
+          agents: agentsCount || 0,
+        }}
       />
     </div>
   );

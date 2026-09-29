@@ -3841,25 +3841,91 @@
     var loadTemplatesFromSupabase = function() {
         var sKey = SUPABASE_KEY || storage.get('supabase_key', DEFAULT_SUPABASE_KEY);
         if (!sKey) return Promise.resolve(false);
-        return supabaseFetch('feedback_templates?select=*', 'GET')
-            .then(function(rows) {
-                if (Array.isArray(rows) && rows.length > 0) {
-                    globalFeedbackTags = rows.map(function(t){
-                        return {
-                            buttonLabel: t.button_label,
-                            feedbackText: t.feedback_text,
-                            sectionIndex: t.section_index,
-                            itemIndex: t.item_index,
-                            optionIndex: t.option_index,
-                            rubricId: t.rubric_id
-                        };
-                    });
-                    refreshFeedbackTagsAndGeneral();
-                    return true;
+        return Promise.all([
+            supabaseFetch('feedback_templates?select=*', 'GET').catch(function(){ return []; }),
+            supabaseFetch('rubric_descriptions?select=*', 'GET').catch(function(){ return []; })
+        ])
+        .then(function(res) {
+            var rows = res[0] || [];
+            var descRows = res[1] || [];
+            if (Array.isArray(rows) && rows.length > 0) {
+                globalFeedbackTags = rows.filter(function(t){
+                    return !!(t.button_label && String(t.button_label).trim());
+                }).map(function(t){
+                    return {
+                        buttonLabel: t.button_label,
+                        feedbackText: t.feedback_text,
+                        sectionIndex: t.section_index,
+                        itemIndex: t.item_index,
+                        optionIndex: t.option_index,
+                        rubricId: t.rubric_id
+                    };
+                });
+
+                var generalTemplates = rows.filter(function(t){
+                    return !(t.button_label && String(t.button_label).trim());
+                }).map(function(t){
+                    return {
+                        feedbackText: t.feedback_text,
+                        sectionIndex: t.section_index,
+                        itemIndex: t.item_index,
+                        optionIndex: t.option_index,
+                        rubricId: t.rubric_id
+                    };
+                });
+                if (generalTemplates.length > 0) {
+                    globalFeedbackGeneral = generalTemplates;
                 }
-                return false;
-            })
-            .catch(function() { return false; });
+            }
+
+            if (Array.isArray(descRows) && descRows.length > 0) {
+                descRows.forEach(function(rd){
+                    var descVal = rd.description;
+                    var compiledText = "";
+                    if (Array.isArray(descVal)) {
+                        descVal.forEach(function(group){
+                            if (group && Array.isArray(group.sections)) {
+                                group.sections.forEach(function(sec){
+                                    var secName = sec.name || "";
+                                    var secContent = (sec.content || []).map(function(c){
+                                        return c.value || c.text || "";
+                                    }).filter(Boolean).join(" ");
+                                    if (secContent) {
+                                        compiledText += (secName ? (secName + ": ") : "") + secContent + "\n";
+                                    }
+                                });
+                            }
+                        });
+                    } else if (typeof descVal === 'string') {
+                        compiledText = descVal;
+                    }
+
+                    compiledText = compiledText.trim();
+                    if (compiledText) {
+                        var existing = globalFeedbackGeneral.find(function(f){
+                            return f.rubricId === rd.rubric_id && f.sectionIndex === rd.section_index && f.itemIndex === rd.item_index && f.optionIndex === rd.option_index;
+                        });
+                        if (existing) {
+                            if (!existing.feedbackText.includes(compiledText)) {
+                                existing.feedbackText = (existing.feedbackText + "\n\n" + compiledText).trim();
+                            }
+                        } else {
+                            globalFeedbackGeneral.push({
+                                feedbackText: compiledText,
+                                sectionIndex: rd.section_index,
+                                itemIndex: rd.item_index,
+                                optionIndex: rd.option_index,
+                                rubricId: rd.rubric_id
+                            });
+                        }
+                    }
+                });
+            }
+
+            refreshFeedbackTagsAndGeneral();
+            return true;
+        })
+        .catch(function() { return false; });
     };
 
     // --- Sync & Initialization Logic (Bulk Processing & Local IndexedDB Storage) ---
@@ -3899,7 +3965,9 @@
                             allRubrics = data.rubrics;
                         }
                         if (Array.isArray(data.feedbackTemplates) && data.feedbackTemplates.length > 0) {
-                            globalFeedbackTags = data.feedbackTemplates.map(function(t){
+                            globalFeedbackTags = data.feedbackTemplates.filter(function(t){
+                                return !!(t.button_label && String(t.button_label).trim());
+                            }).map(function(t){
                                 return {
                                     buttonLabel: t.button_label,
                                     feedbackText: t.feedback_text,
@@ -3909,7 +3977,67 @@
                                     rubricId: t.rubric_id
                                 };
                             });
+
+                            var generalTemplates = data.feedbackTemplates.filter(function(t){
+                                return !(t.button_label && String(t.button_label).trim());
+                            }).map(function(t){
+                                return {
+                                    feedbackText: t.feedback_text,
+                                    sectionIndex: t.section_index,
+                                    itemIndex: t.item_index,
+                                    optionIndex: t.option_index,
+                                    rubricId: t.rubric_id
+                                };
+                            });
+                            if (generalTemplates.length > 0) {
+                                globalFeedbackGeneral = generalTemplates;
+                            }
                         }
+
+                        if (Array.isArray(data.rubricDescriptions) && data.rubricDescriptions.length > 0) {
+                            data.rubricDescriptions.forEach(function(rd){
+                                var descVal = rd.description;
+                                var compiledText = "";
+                                if (Array.isArray(descVal)) {
+                                    descVal.forEach(function(group){
+                                        if (group && Array.isArray(group.sections)) {
+                                            group.sections.forEach(function(sec){
+                                                var secName = sec.name || "";
+                                                var secContent = (sec.content || []).map(function(c){
+                                                    return c.value || c.text || "";
+                                                }).filter(Boolean).join(" ");
+                                                if (secContent) {
+                                                    compiledText += (secName ? (secName + ": ") : "") + secContent + "\n";
+                                                }
+                                            });
+                                        }
+                                    });
+                                } else if (typeof descVal === 'string') {
+                                    compiledText = descVal;
+                                }
+
+                                compiledText = compiledText.trim();
+                                if (compiledText) {
+                                    var existing = globalFeedbackGeneral.find(function(f){
+                                        return f.rubricId === rd.rubric_id && f.sectionIndex === rd.section_index && f.itemIndex === rd.item_index && f.optionIndex === rd.option_index;
+                                    });
+                                    if (existing) {
+                                        if (!existing.feedbackText.includes(compiledText)) {
+                                            existing.feedbackText = (existing.feedbackText + "\n\n" + compiledText).trim();
+                                        }
+                                    } else {
+                                        globalFeedbackGeneral.push({
+                                            feedbackText: compiledText,
+                                            sectionIndex: rd.section_index,
+                                            itemIndex: rd.item_index,
+                                            optionIndex: rd.option_index,
+                                            rubricId: rd.rubric_id
+                                        });
+                                    }
+                                }
+                            });
+                        }
+
                         if (Array.isArray(data.assignments)) {
                             globalAssignments = data.assignments;
                         }
@@ -3919,11 +4047,13 @@
                             rubrics: allRubrics,
                             assignments: globalAssignments,
                             feedbackChips: globalFeedbackTags,
+                            feedbackGeneral: globalFeedbackGeneral,
                             evalTypes: globalEvalTypes,
                             qaName: currentQaDisplayName,
                             qaFirstName: qaFirstName
                         });
 
+                        refreshFeedbackTagsAndGeneral();
                         updateHeaderTitle();
                         updateAgentDropdown();
                         autoSelectAssignmentAndDate();

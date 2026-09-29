@@ -14,22 +14,47 @@ import {
   Copy,
   Check,
   ExternalLink,
+  Database,
+  BookOpen,
+  MessageSquareQuote,
+  RefreshCw,
 } from "lucide-react";
 
 interface SettingsFormProps {
   initialSheetId: string;
   initialGeminiKey?: string;
+  initialCounts?: {
+    rubrics: number;
+    feedbackTemplates: number;
+    rubricDescriptions: number;
+    assignments: number;
+    evaluations: number;
+    agents: number;
+  };
 }
 
 export function SettingsForm({
   initialSheetId,
   initialGeminiKey = "",
+  initialCounts,
 }: SettingsFormProps) {
   const [sheetId, setSheetId] = useState(initialSheetId);
   const [geminiKey, setGeminiKey] = useState(initialGeminiKey);
+  const [counts, setCounts] = useState(
+    initialCounts || {
+      rubrics: 0,
+      feedbackTemplates: 0,
+      rubricDescriptions: 0,
+      assignments: 0,
+      evaluations: 0,
+      agents: 0,
+    }
+  );
   const [showKey, setShowKey] = useState(false);
   const [isSavingSheet, setIsSavingSheet] = useState(false);
   const [isSavingGemini, setIsSavingGemini] = useState(false);
+  const [isSyncingTemplates, setIsSyncingTemplates] = useState(false);
+  const [isSyncingAll, setIsSyncingAll] = useState(false);
   const [copiedCode, setCopiedCode] = useState(false);
   const [message, setMessage] = useState<{
     type: "success" | "error";
@@ -89,6 +114,49 @@ export function SettingsForm({
     navigator.clipboard.writeText(bookmarkletCode);
     setCopiedCode(true);
     setTimeout(() => setCopiedCode(false), 2000);
+  }
+
+  async function handleSync(action: "sync-templates" | "sync-live") {
+    if (action === "sync-templates") setIsSyncingTemplates(true);
+    else setIsSyncingAll(true);
+    setMessage(null);
+
+    try {
+      const res = await fetch("/api/sync", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action, sheetId }),
+      });
+      const data = await res.json();
+
+      if (!res.ok || data.error) {
+        throw new Error(data.error || "Failed to sync from Google Sheet");
+      }
+
+      setMessage({
+        type: "success",
+        text: data.message || "Sync completed successfully!",
+      });
+
+      // Refresh live counts from API
+      try {
+        const countRes = await fetch("/api/sync");
+        const countData = await countRes.json();
+        if (countData && countData.counts) {
+          setCounts(countData.counts);
+        }
+      } catch (err) {
+        // ignore
+      }
+    } catch (err: any) {
+      setMessage({
+        type: "error",
+        text: err.message || "Failed to sync from Google Sheet.",
+      });
+    } finally {
+      setIsSyncingTemplates(false);
+      setIsSyncingAll(false);
+    }
   }
 
   return (
@@ -175,6 +243,94 @@ export function SettingsForm({
             </button>
           </div>
         </form>
+      </div>
+
+      {/* Rubric Descriptions & Feedback Templates Card */}
+      <div className="bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 p-6 shadow-sm">
+        <div className="flex items-center justify-between mb-4">
+          <div className="flex items-center gap-3">
+            <div className="w-10 h-10 rounded-xl bg-blue-500/10 text-blue-600 dark:text-blue-400 flex items-center justify-center">
+              <Database className="w-5 h-5" />
+            </div>
+            <div>
+              <h2 className="text-base font-semibold text-slate-900 dark:text-white">
+                Rubric Guidelines &amp; Feedback Templates
+              </h2>
+              <p className="text-xs text-slate-500 dark:text-slate-400">
+                Sync criteria guidelines, behavior descriptions, and feedback coaching templates from Google Sheet into Supabase.
+              </p>
+            </div>
+          </div>
+        </div>
+
+        {/* Live Counts Grid */}
+        <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 mb-5">
+          <div className="p-3.5 rounded-xl bg-slate-50 dark:bg-slate-800/60 border border-slate-200/80 dark:border-slate-700/80">
+            <div className="flex items-center justify-between text-xs text-slate-500 dark:text-slate-400 mb-1">
+              <span>Feedback Templates</span>
+              <MessageSquareQuote className="w-4 h-4 text-amber-500" />
+            </div>
+            <div className="text-xl font-bold text-slate-900 dark:text-white">
+              {counts.feedbackTemplates.toLocaleString()}
+            </div>
+            <div className="text-[11px] text-slate-400 mt-0.5">
+              Coaching chips &amp; tag templates
+            </div>
+          </div>
+
+          <div className="p-3.5 rounded-xl bg-slate-50 dark:bg-slate-800/60 border border-slate-200/80 dark:border-slate-700/80">
+            <div className="flex items-center justify-between text-xs text-slate-500 dark:text-slate-400 mb-1">
+              <span>Rubric Guidelines</span>
+              <BookOpen className="w-4 h-4 text-blue-500" />
+            </div>
+            <div className="text-xl font-bold text-slate-900 dark:text-white">
+              {counts.rubricDescriptions.toLocaleString()}
+            </div>
+            <div className="text-[11px] text-slate-400 mt-0.5">
+              Option behaviors &amp; coaching rules
+            </div>
+          </div>
+
+          <div className="p-3.5 rounded-xl bg-slate-50 dark:bg-slate-800/60 border border-slate-200/80 dark:border-slate-700/80">
+            <div className="flex items-center justify-between text-xs text-slate-500 dark:text-slate-400 mb-1">
+              <span>Rubrics</span>
+              <FileSpreadsheet className="w-4 h-4 text-emerald-500" />
+            </div>
+            <div className="text-xl font-bold text-slate-900 dark:text-white">
+              {counts.rubrics.toLocaleString()}
+            </div>
+            <div className="text-[11px] text-slate-400 mt-0.5">
+              Active scoring rubrics
+            </div>
+          </div>
+        </div>
+
+        <div className="p-3.5 rounded-xl bg-blue-50/70 dark:bg-blue-950/20 border border-blue-200/80 dark:border-blue-900/40 text-xs text-blue-900 dark:text-blue-300 mb-5 leading-relaxed">
+          💡 <strong>Bookmarklet AI Integration:</strong> The Bookmarklet uses these exact coaching guidelines and templates to evaluate interactions and generate meaningful, fact-grounded feedback paragraphs for each line item.
+        </div>
+
+        {/* Sync Action Buttons */}
+        <div className="flex flex-wrap items-center justify-end gap-3 pt-2 border-t border-slate-100 dark:border-slate-800">
+          <button
+            type="button"
+            onClick={() => handleSync("sync-live")}
+            disabled={isSyncingAll || isSyncingTemplates || !sheetId}
+            className="inline-flex items-center gap-2 px-3.5 py-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 hover:bg-slate-50 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-200 font-semibold text-xs transition-colors disabled:opacity-50"
+          >
+            <RefreshCw className={`w-3.5 h-3.5 ${isSyncingAll ? "animate-spin" : ""}`} />
+            {isSyncingAll ? "Syncing All Data..." : "Sync All Tables"}
+          </button>
+
+          <button
+            type="button"
+            onClick={() => handleSync("sync-templates")}
+            disabled={isSyncingTemplates || isSyncingAll || !sheetId}
+            className="inline-flex items-center gap-2 px-4 py-2 rounded-xl bg-blue-600 hover:bg-blue-700 active:bg-blue-800 text-white font-semibold text-xs transition-colors shadow-sm disabled:opacity-50"
+          >
+            <RefreshCw className={`w-3.5 h-3.5 ${isSyncingTemplates ? "animate-spin" : ""}`} />
+            {isSyncingTemplates ? "Syncing Templates & Guidelines..." : "Update Feedback Templates & Guidelines"}
+          </button>
+        </div>
       </div>
 
       {/* Gemini AI API Configuration Card */}

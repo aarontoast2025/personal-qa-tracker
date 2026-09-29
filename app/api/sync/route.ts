@@ -21,6 +21,8 @@ export async function GET() {
     { count: evaluationsCount },
     { count: agentsCount },
     { count: rubricsCount },
+    { count: feedbackTemplatesCount },
+    { count: rubricDescriptionsCount },
     { data: lastLog },
     { data: settings },
   ] = await Promise.all([
@@ -28,6 +30,8 @@ export async function GET() {
     supabase.from("evaluations").select("*", { count: "exact", head: true }),
     supabase.from("agents").select("*", { count: "exact", head: true }),
     supabase.from("rubrics").select("*", { count: "exact", head: true }),
+    supabase.from("feedback_templates").select("*", { count: "exact", head: true }),
+    supabase.from("rubric_descriptions").select("*", { count: "exact", head: true }),
     supabase
       .from("sync_logs")
       .select("*")
@@ -43,6 +47,8 @@ export async function GET() {
       evaluations: evaluationsCount || 0,
       agents: agentsCount || 0,
       rubrics: rubricsCount || 0,
+      feedbackTemplates: feedbackTemplatesCount || 0,
+      rubricDescriptions: rubricDescriptionsCount || 0,
     },
     lastLog,
     googleSheetId: settings?.google_sheet_id || "",
@@ -163,19 +169,29 @@ export async function POST(request: Request) {
   try {
     const results: Record<string, number> = {};
 
-    // Helper to fetch rows either via GViz CSV or Google API
-    async function getTabRows(tabName: string): Promise<Record<string, string>[]> {
-      try {
-        return await fetchSheetCsv(sheetId, tabName);
-      } catch (e) {
-        const raw = await fetchSheetValues(sheetId, `${tabName}!A1:Z`);
-        return rowsToObjects(raw);
+    // Helper to fetch rows either via GViz CSV or Google API with multiple tab name variations
+    async function getTabRows(tabNames: string | string[]): Promise<Record<string, string>[]> {
+      const names = Array.isArray(tabNames) ? tabNames : [tabNames];
+      for (const name of names) {
+        try {
+          const rows = await fetchSheetCsv(sheetId, name);
+          if (rows && rows.length > 0) return rows;
+        } catch (e) {
+          try {
+            const raw = await fetchSheetValues(sheetId, `${name}!A1:Z`);
+            const rows = rowsToObjects(raw);
+            if (rows && rows.length > 0) return rows;
+          } catch (err) {
+            // try next variation
+          }
+        }
       }
+      return [];
     }
 
-    // 1. Sync Rubrics first (so foreign keys on assignments resolve cleanly)
+    // 1. Sync Rubrics first (so foreign keys on assignments and templates resolve cleanly)
     try {
-      const rubrics = await getTabRows("Rubrics");
+      const rubrics = await getTabRows(["Rubrics", "Rubric"]);
       if (rubrics.length > 0) {
         results.rubrics = await syncRubrics(supabase, rubrics);
       }
@@ -183,47 +199,112 @@ export async function POST(request: Request) {
       console.warn("Rubrics tab sync warning:", e.message);
     }
 
-    // 2. Sync Agents
+    // 2. Sync Rubric Descriptions
     try {
-      const agents = await getTabRows("Agents");
-      if (agents.length > 0) {
-        results.agents = await syncAgents(supabase, agents);
+      const rubricDescriptions = await getTabRows([
+        "RubricDescriptions",
+        "Rubric Descriptions",
+        "Rubric_Descriptions",
+        "RubricDescription",
+      ]);
+      if (rubricDescriptions.length > 0) {
+        results.rubricDescriptions = await syncRubricDescriptions(supabase, rubricDescriptions);
       }
     } catch (e: any) {
-      console.warn("Agents tab sync warning:", e.message);
+      console.warn("RubricDescriptions tab sync warning:", e.message);
     }
 
-    // 3. Sync Assignments
+    // 3. Sync Feedback Templates
     try {
-      const assignments = await getTabRows("Assignments");
-      if (assignments.length > 0) {
-        results.assignments = await syncAssignments(supabase, assignments);
+      const feedbackTemplates = await getTabRows([
+        "FeedbackTemplates",
+        "Feedback Templates",
+        "Feedback_Templates",
+        "FeedbackTemplate",
+      ]);
+      if (feedbackTemplates.length > 0) {
+        results.feedbackTemplates = await syncFeedbackTemplates(supabase, feedbackTemplates);
       }
     } catch (e: any) {
-      console.warn("Assignments tab sync warning:", e.message);
+      console.warn("FeedbackTemplates tab sync warning:", e.message);
     }
 
-    // 4. Sync Evaluations (so Interaction IDs are all known)
-    try {
-      const evaluations = await getTabRows("Evaluations");
-      if (evaluations.length > 0) {
-        results.evaluations = await syncEvaluations(supabase, evaluations);
+    // Automatic fallback to local CSV files if Google Sheet tabs are empty or missing
+    const csvDir = path.join(process.cwd(), "CSV");
+    if (
+      (!results.rubricDescriptions || results.rubricDescriptions === 0) &&
+      fs.existsSync(path.join(csvDir, "Dev QA Tracker - RubricDescriptions.csv"))
+    ) {
+      try {
+        const rows = parseCsv(
+          fs.readFileSync(path.join(csvDir, "Dev QA Tracker - RubricDescriptions.csv"), "utf-8")
+        );
+        const synced = await syncRubricDescriptions(supabase, rows);
+        if (synced > 0) results.rubricDescriptions = synced;
+      } catch (e) {}
+    }
+    if (
+      (!results.feedbackTemplates || results.feedbackTemplates === 0) &&
+      fs.existsSync(path.join(csvDir, "Dev QA Tracker - FeedbackTemplates.csv"))
+    ) {
+      try {
+        const rows = parseCsv(
+          fs.readFileSync(path.join(csvDir, "Dev QA Tracker - FeedbackTemplates.csv"), "utf-8")
+        );
+        const synced = await syncFeedbackTemplates(supabase, rows);
+        if (synced > 0) results.feedbackTemplates = synced;
+      } catch (e) {}
+    }
+
+    // If only syncing templates, stop here
+    if (action !== "sync-templates") {
+      // 4. Sync Agents
+      try {
+        const agents = await getTabRows(["Agents", "Agent"]);
+        if (agents.length > 0) {
+          results.agents = await syncAgents(supabase, agents);
+        }
+      } catch (e: any) {
+        console.warn("Agents tab sync warning:", e.message);
       }
-    } catch (e: any) {
-      console.warn("Evaluations tab sync warning:", e.message);
+
+      // 5. Sync Assignments
+      try {
+        const assignments = await getTabRows(["Assignments", "Assignment"]);
+        if (assignments.length > 0) {
+          results.assignments = await syncAssignments(supabase, assignments);
+        }
+      } catch (e: any) {
+        console.warn("Assignments tab sync warning:", e.message);
+      }
+
+      // 6. Sync Evaluations (so Interaction IDs are all known)
+      try {
+        const evaluations = await getTabRows(["Evaluations", "Evaluation"]);
+        if (evaluations.length > 0) {
+          results.evaluations = await syncEvaluations(supabase, evaluations);
+        }
+      } catch (e: any) {
+        console.warn("Evaluations tab sync warning:", e.message);
+      }
     }
 
     await supabase.from("sync_logs").insert({
       user_id: user?.id || null,
-      target_table: "google_sheet",
+      target_table: action === "sync-templates" ? "feedback_templates" : "google_sheet",
       rows_synced: Object.values(results).reduce((a, b) => a + b, 0),
       status: "success",
       completed_at: new Date().toISOString(),
     });
 
+    const msg =
+      action === "sync-templates"
+        ? `Successfully synced ${results.feedbackTemplates || 0} feedback templates, ${results.rubricDescriptions || 0} rubric guidelines, and ${results.rubrics || 0} rubrics.`
+        : `Successfully fetched latest data from Google Sheet (${results.assignments || 0} assignments, ${results.evaluations || 0} evaluations, ${results.feedbackTemplates || 0} templates, ${results.rubricDescriptions || 0} guidelines).`;
+
     return NextResponse.json({
       success: true,
-      message: `Successfully fetched latest data from Google Sheet (${results.assignments || 0} assignments, ${results.evaluations || 0} evaluations).`,
+      message: msg,
       counts: results,
     });
   } catch (err: any) {

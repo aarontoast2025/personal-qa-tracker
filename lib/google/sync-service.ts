@@ -224,16 +224,23 @@ export async function syncRubricDescriptions(
   if (!rows || rows.length === 0) return 0;
 
   const records = rows
-    .filter((r) => r.ID && r["Rubric ID"])
-    .map((r) => ({
-      id: String(r.ID).trim(),
-      rubric_id: String(r["Rubric ID"]).trim(),
-      section_index: parseInt(r["Section Index"]) || 0,
-      item_index: parseInt(r["Item Index"]) || 0,
-      option_index: parseInt(r["Option Index"]) || 0,
-      description: safeJsonParse(r.Description, []),
-      synced_at: new Date().toISOString(),
-    }));
+    .filter((r) => (r.ID || r.id) && (r["Rubric ID"] || r.rubric_id))
+    .map((r) => {
+      const rawDesc = r.Description || r.description;
+      let parsedDesc = safeJsonParse(rawDesc, null);
+      if (!parsedDesc && typeof rawDesc === "string" && rawDesc.trim()) {
+        parsedDesc = [{ sections: [{ name: "Guidelines", content: [{ type: "text", value: rawDesc.trim() }] }] }];
+      }
+      return {
+        id: String(r.ID || r.id).trim(),
+        rubric_id: String(r["Rubric ID"] || r.rubric_id).trim(),
+        section_index: parseInt(r["Section Index"] ?? r.section_index) || 0,
+        item_index: parseInt(r["Item Index"] ?? r.item_index) || 0,
+        option_index: parseInt(r["Option Index"] ?? r.option_index) || 0,
+        description: parsedDesc || [],
+        synced_at: new Date().toISOString(),
+      };
+    });
 
   const { error } = await supabase
     .from("rubric_descriptions")
@@ -254,18 +261,18 @@ export async function syncFeedbackTemplates(
   if (!rows || rows.length === 0) return 0;
 
   const records = rows
-    .filter((r) => r.ID && r["Feedback Text"])
+    .filter((r) => (r.ID || r.id) && (r["Feedback Text"] || r.feedback_text))
     .map((r) => ({
-      id: String(r.ID).trim(),
-      created_by: r["Created By"] || null,
-      rubric_id: r["Rubric ID"] || null,
-      section_index: parseInt(r["Section Index"]) || 0,
-      item_index: parseInt(r["Item Index"]) || 0,
-      option_index: parseInt(r["Option Index"]) || 0,
-      button_label: r["Button Label"] || null,
-      feedback_text: r["Feedback Text"],
-      created_at: r["Created At"] || new Date().toISOString(),
-      updated_at: r["Last Updated"] || new Date().toISOString(),
+      id: String(r.ID || r.id).trim(),
+      created_by: r["Created By"] || r.created_by || null,
+      rubric_id: r["Rubric ID"] || r.rubric_id || null,
+      section_index: parseInt(r["Section Index"] ?? r.section_index) || 0,
+      item_index: parseInt(r["Item Index"] ?? r.item_index) || 0,
+      option_index: parseInt(r["Option Index"] ?? r.option_index) || 0,
+      button_label: (r["Button Label"] || r.button_label || "").trim() || null,
+      feedback_text: String(r["Feedback Text"] || r.feedback_text).trim(),
+      created_at: r["Created At"] || r.created_at || new Date().toISOString(),
+      updated_at: r["Last Updated"] || r.updated_at || new Date().toISOString(),
       synced_at: new Date().toISOString(),
     }));
 
