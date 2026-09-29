@@ -41,6 +41,15 @@ export async function POST(request: Request) {
         // preserve as string or null
       }
     }
+    const aEmail = evalData.agentEmail || evalData.agent_email || (agentSnapshot && (agentSnapshot.email || agentSnapshot.toasttab_email)) || "";
+    if (aEmail && typeof agentSnapshot === "object" && agentSnapshot !== null) {
+      agentSnapshot.email = aEmail;
+    } else if (!agentSnapshot && aEmail) {
+      agentSnapshot = {
+        name: evalData.agentName || evalData.agent_name || "Unknown",
+        email: aEmail,
+      };
+    }
 
     const evaluationRecord = {
       id: evalId,
@@ -48,7 +57,6 @@ export async function POST(request: Request) {
       interaction_id: interactionId,
       assignment_id: assignmentId,
       agent_name: evalData.agentName || evalData.agent_name || "Unknown",
-      agent_email: evalData.agentEmail || evalData.agent_email || "",
       agent_snapshot: agentSnapshot,
       qa_name: evalData.qaName || evalData.qa_name || "QA Evaluator",
       qa_email: evalData.qaEmail || evalData.qa_email || null,

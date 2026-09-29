@@ -2673,6 +2673,19 @@
         var resolvedAgentName = (selectedOpt && selectedOpt.dataset.agentName) ? selectedOpt.dataset.agentName : getAdvocateNameFromPage();
         var selectedAsg = selectedAssignmentId ? globalAssignments.find(function(a){ return a.id === selectedAssignmentId; }) : null;
         var agentSnap = selectedAsg && selectedAsg.agentSnapshot ? (typeof selectedAsg.agentSnapshot === 'string' ? JSON.parse(selectedAsg.agentSnapshot) : selectedAsg.agentSnapshot) : null;
+        var selectedAgentEmail = (selectedAsg && (selectedAsg.agentEmail || selectedAsg.agent_email)) || '';
+        if (!agentSnap) {
+            agentSnap = {
+                displayName: resolvedAgentName,
+                fullName: resolvedAgentName,
+                email: selectedAgentEmail,
+                agentEmail: selectedAgentEmail
+            };
+        } else if (typeof agentSnap === 'object') {
+            if (!agentSnap.email && selectedAgentEmail) {
+                agentSnap.email = selectedAgentEmail;
+            }
+        }
 
         var resolvedQaName = currentQaDisplayName || storage.get('qa_name', '') || formatEmailToName(QA_EMAIL) || QA_EMAIL;
 
@@ -2683,7 +2696,7 @@
             evaluationData: {
                 interactionId: inpInteractionId.value.trim(),
                 agentName: resolvedAgentName,
-                agentEmail: (selectedAsg && selectedAsg.agentEmail) || '',
+                agentEmail: selectedAgentEmail,
                 agentSnapshot: agentSnap,
                 qaName: resolvedQaName,
                 evaluationType: (selEvalType && selEvalType.value) ? selEvalType.value : ((selectedAsg && (selectedAsg.evaluationType || selectedAsg.evaluation_type || selectedAsg.evaluationsType || selectedAsg.evalType)) || 'Manual Audit'),
@@ -2740,7 +2753,6 @@
                 interaction_id: inpInteractionId.value.trim(),
                 qa_email: QA_EMAIL,
                 qa_name: resolvedQaName,
-                agent_email: (selectedAsg && selectedAsg.agentEmail) || (selectedAsg && selectedAsg.agent_email) || '',
                 agent_name: resolvedAgentName,
                 score: finalScorePercentage,
                 evaluation_type: (selEvalType && selEvalType.value) ? selEvalType.value : ((selectedAsg && (selectedAsg.evaluationType || selectedAsg.evaluation_type || selectedAsg.evaluationsType || selectedAsg.evalType)) || 'Manual Audit'),
