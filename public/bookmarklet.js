@@ -3907,10 +3907,16 @@
     var loadTemplatesFromSupabase = function() {
         var sKey = SUPABASE_KEY || storage.get('supabase_key', DEFAULT_SUPABASE_KEY);
         if (!sKey) return Promise.resolve(false);
-        return supabaseFetch('feedback_templates?select=*', 'GET')
+        var targetQaEmail = (QA_EMAIL || storage.get('qa_email', DEFAULT_QA_EMAIL)).trim().toLowerCase();
+        var endpoint = 'feedback_templates?select=*&created_by=ilike.' + encodeURIComponent(targetQaEmail);
+        return supabaseFetch(endpoint, 'GET')
             .then(function(rows) {
-                if (Array.isArray(rows) && rows.length > 0) {
-                    globalFeedbackTags = rows.filter(function(t){
+                if (Array.isArray(rows)) {
+                    var userRows = rows.filter(function(t){
+                        var owner = (t.created_by || t.createdBy || '').trim().toLowerCase();
+                        return owner === targetQaEmail;
+                    });
+                    globalFeedbackTags = userRows.filter(function(t){
                         return !!(t.button_label && String(t.button_label).trim());
                     }).map(function(t){
                         return {
@@ -3923,7 +3929,7 @@
                         };
                     });
 
-                    var generalTemplates = rows.filter(function(t){
+                    var generalTemplates = userRows.filter(function(t){
                         return !(t.button_label && String(t.button_label).trim());
                     }).map(function(t){
                         return {
@@ -3934,9 +3940,10 @@
                             rubricId: t.rubric_id
                         };
                     });
-                    if (generalTemplates.length > 0) {
-                        globalFeedbackGeneral = generalTemplates;
-                    }
+                    globalFeedbackGeneral = generalTemplates;
+                } else {
+                    globalFeedbackTags = [];
+                    globalFeedbackGeneral = [];
                 }
 
                 refreshFeedbackTagsAndGeneral();
@@ -3982,8 +3989,13 @@
                         if (Array.isArray(data.rubrics) && data.rubrics.length > 0) {
                             allRubrics = data.rubrics;
                         }
-                        if (Array.isArray(data.feedbackTemplates) && data.feedbackTemplates.length > 0) {
-                            globalFeedbackTags = data.feedbackTemplates.filter(function(t){
+                        if (Array.isArray(data.feedbackTemplates)) {
+                            var currentTargetEmail = String(targetQaEmail || '').trim().toLowerCase();
+                            var userTemplates = data.feedbackTemplates.filter(function(t){
+                                var owner = (t.created_by || t.createdBy || '').trim().toLowerCase();
+                                return owner === currentTargetEmail;
+                            });
+                            globalFeedbackTags = userTemplates.filter(function(t){
                                 return !!(t.button_label && String(t.button_label).trim());
                             }).map(function(t){
                                 return {
@@ -3996,7 +4008,7 @@
                                 };
                             });
 
-                            var generalTemplates = data.feedbackTemplates.filter(function(t){
+                            var generalTemplates = userTemplates.filter(function(t){
                                 return !(t.button_label && String(t.button_label).trim());
                             }).map(function(t){
                                 return {
@@ -4007,9 +4019,7 @@
                                     rubricId: t.rubric_id
                                 };
                             });
-                            if (generalTemplates.length > 0) {
-                                globalFeedbackGeneral = generalTemplates;
-                            }
+                            globalFeedbackGeneral = generalTemplates;
                         }
 
                         if (Array.isArray(data.rubricDescriptions)) {

@@ -37,11 +37,15 @@ export async function GET(request: Request) {
         .order("date", { ascending: false }),
       supabase.from("rubrics").select("*"),
       supabase.from("rubric_descriptions").select("*"),
-      supabase.from("feedback_templates").select("*"),
+      supabase
+        .from("feedback_templates")
+        .select("*")
+        .ilike("created_by", qaEmail),
     ]);
 
     if (asgErr) console.warn("Bookmarklet init assignments warning:", asgErr.message);
     if (rubErr) console.warn("Bookmarklet init rubrics warning:", rubErr.message);
+    if (tmplErr) console.warn("Bookmarklet init templates warning:", tmplErr.message);
 
     // Transform assignments for bookmarklet format
     const formattedAssignments = (assignments || []).map((a) => {
