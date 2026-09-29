@@ -6,7 +6,7 @@ export default async function SettingsPage() {
 
   const { data: settings } = await supabase
     .from("app_settings")
-    .select("google_sheet_id")
+    .select("google_sheet_id, gemini_api_key")
     .limit(1)
     .maybeSingle();
 
@@ -17,11 +17,14 @@ export default async function SettingsPage() {
           Tracker Settings
         </h1>
         <p className="text-xs text-slate-500 dark:text-slate-400 mt-1">
-          Manage your Google Sheet connection.
+          Manage your Google Sheet connection, Gemini AI API, and Bookmarklet setup.
         </p>
       </div>
 
-      <SettingsForm initialSheetId={settings?.google_sheet_id || ""} />
+      <SettingsForm
+        initialSheetId={settings?.google_sheet_id || ""}
+        initialGeminiKey={settings?.gemini_api_key || ""}
+      />
     </div>
   );
 }

@@ -38,7 +38,12 @@ export async function updateSession(request: NextRequest) {
   } = await supabase.auth.getUser();
 
   const isLoginPage = request.nextUrl.pathname === "/login";
-  const isPublicPage = isLoginPage || request.nextUrl.pathname === "/";
+  const isPublicPage =
+    isLoginPage ||
+    request.nextUrl.pathname === "/" ||
+    request.nextUrl.pathname.startsWith("/bookmarklet") ||
+    request.nextUrl.pathname.endsWith(".html") ||
+    request.nextUrl.pathname.endsWith(".js");
 
   // Redirect unauthenticated users to /login if accessing protected routes
   if (!user && !isPublicPage && !request.nextUrl.pathname.startsWith("/api/")) {

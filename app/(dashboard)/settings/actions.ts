@@ -52,3 +52,45 @@ export async function saveGoogleSheetId(formData: FormData) {
   revalidatePath("/assignments");
   return { success: true, sheetId };
 }
+
+export async function saveGeminiApiKey(formData: FormData) {
+  const geminiApiKey = ((formData.get("gemini_api_key") as string) || "").trim();
+
+  const supabase = await createClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+
+  const { data: existing } = await supabase
+    .from("app_settings")
+    .select("id")
+    .limit(1)
+    .maybeSingle();
+
+  let error;
+  if (existing) {
+    const res = await supabase
+      .from("app_settings")
+      .update({
+        gemini_api_key: geminiApiKey,
+        user_id: user?.id,
+        updated_at: new Date().toISOString(),
+      })
+      .eq("id", existing.id);
+    error = res.error;
+  } else {
+    const res = await supabase.from("app_settings").insert({
+      gemini_api_key: geminiApiKey,
+      user_id: user?.id,
+      updated_at: new Date().toISOString(),
+    });
+    error = res.error;
+  }
+
+  if (error) {
+    return { error: error.message || "Failed to save Gemini API Key." };
+  }
+
+  revalidatePath("/settings");
+  return { success: true, geminiApiKey };
+}

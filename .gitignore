@@ -33,6 +33,9 @@ CSV/
 # vercel
 .vercel
 
+# local legacy project
+old/
+
 # typescript
 *.tsbuildinfo
 next-env.d.ts

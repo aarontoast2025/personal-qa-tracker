@@ -1,0 +1,667 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Stella Connect - Test QA Review Page</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+      background-color: #f1f5f9;
+      color: #1e293b;
+      line-height: 1.5;
+    }
+    .top-banner {
+      background: linear-gradient(135deg, #1e293b 0%, #0f172a 100%);
+      color: white;
+      padding: 12px 24px;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      box-shadow: 0 2px 8px rgba(0,0,0,0.15);
+      position: sticky;
+      top: 0;
+      z-index: 1000;
+    }
+    .top-banner .logo { font-weight: 700; font-size: 16px; display: flex; align-items: center; gap: 8px; }
+    .top-banner .badge { background: #3b82f6; padding: 3px 8px; border-radius: 12px; font-size: 11px; text-transform: uppercase; font-weight: 700; }
+    .top-banner .actions { display: flex; gap: 10px; align-items: center; }
+    .btn-test-bookmarklet {
+      background: #f59e0b;
+      color: #1e293b;
+      border: none;
+      padding: 7px 14px;
+      border-radius: 6px;
+      font-size: 13px;
+      font-weight: 700;
+      cursor: pointer;
+      box-shadow: 0 2px 4px rgba(0,0,0,0.2);
+      transition: all 0.2s;
+    }
+    .btn-test-bookmarklet:hover { background: #d97706; color: white; }
+
+    .main-container {
+      max-width: 1200px;
+      margin: 24px auto;
+      padding: 0 20px;
+      display: grid;
+      grid-template-columns: 360px 1fr;
+      gap: 24px;
+    }
+    @media (max-width: 900px) {
+      .main-container { grid-template-columns: 1fr; }
+    }
+
+    /* Sidebar: Advocate info and transcript */
+    .sidebar { display: flex; flex-direction: column; gap: 20px; }
+    .card {
+      background: white;
+      border-radius: 8px;
+      border: 1px solid #e2e8f0;
+      box-shadow: 0 1px 3px rgba(0,0,0,0.05);
+      overflow: hidden;
+    }
+    .review-info {
+      padding: 20px;
+      border-bottom: 1px solid #e2e8f0;
+    }
+    .review-info h2 {
+      font-size: 20px;
+      font-weight: 700;
+      color: #0f172a;
+      margin-bottom: 6px;
+    }
+    .review-info .role { font-size: 13px; color: #64748b; }
+
+    .metadata-grid {
+      padding: 16px 20px;
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 14px;
+      background: #fafafa;
+    }
+    .meta-item h4 {
+      font-size: 11px;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+      color: #64748b;
+      margin-bottom: 4px;
+      font-weight: 600;
+    }
+    .meta-item p {
+      font-size: 14px;
+      font-weight: 600;
+      color: #1e293b;
+      word-break: break-all;
+    }
+
+    .transcript-card {
+      padding: 20px;
+    }
+    .transcript-header {
+      font-size: 15px;
+      font-weight: 700;
+      color: #0f172a;
+      margin-bottom: 12px;
+      padding-bottom: 8px;
+      border-bottom: 2px solid #e2e8f0;
+      display: flex;
+      justify-content: space-between;
+    }
+    .transcript-content-box {
+      max-height: 480px;
+      overflow-y: auto;
+      background: #f8fafc;
+      border: 1px solid #e2e8f0;
+      border-radius: 6px;
+      padding: 14px;
+      font-size: 13px;
+      line-height: 1.6;
+    }
+    .spec-transcript-content {
+      white-space: pre-wrap;
+      font-family: inherit;
+    }
+    .turn-agent { color: #2563eb; font-weight: 600; }
+    .turn-cust { color: #0f172a; font-weight: 600; }
+
+    /* Form Content */
+    .qa-form-flow { display: flex; flex-direction: column; gap: 20px; }
+    .padding-xlarge {
+      padding: 24px;
+    }
+    .stella-section-card {
+      background: white;
+      border-radius: 8px;
+      border: 1px solid #e2e8f0;
+      box-shadow: 0 1px 3px rgba(0,0,0,0.05);
+    }
+    .stella-section-title {
+      font-size: 18px;
+      font-weight: 700;
+      color: #0f172a;
+      margin-bottom: 16px;
+      padding-bottom: 8px;
+      border-bottom: 2px solid #3b82f6;
+    }
+    .stella-section-body {
+      display: flex;
+      flex-direction: column;
+      gap: 16px;
+    }
+
+    .stella-question-item {
+      padding: 14px;
+      background: #f8fafc;
+      border: 1px solid #e2e8f0;
+      border-radius: 6px;
+      transition: border-color 0.2s;
+    }
+    .stella-question-item:hover { border-color: #cbd5e1; }
+    .stella-question-header {
+      margin-bottom: 10px;
+      display: flex;
+      gap: 8px;
+      font-size: 14px;
+      font-weight: 600;
+      color: #1e293b;
+    }
+    .stella-question-num { color: #2563eb; }
+
+    .stella-segmented-control-wrapper {
+      display: flex;
+      gap: 6px;
+      flex-wrap: wrap;
+    }
+    .stella-control-btn {
+      padding: 7px 12px;
+      border: 1px solid #cbd5e1;
+      background: white;
+      border-radius: 4px;
+      font-size: 12px;
+      font-weight: 500;
+      color: #334155;
+      cursor: pointer;
+      transition: all 0.15s ease-in-out;
+    }
+    .stella-control-btn:hover {
+      background: #f1f5f9;
+      border-color: #94a3b8;
+    }
+    .stella-control-btn.active {
+      background: #2563eb;
+      color: white;
+      border-color: #1d4ed8;
+      font-weight: 600;
+    }
+
+    .stella-comment-textarea {
+      width: 100%;
+      height: 70px;
+      border: 1px solid #cbd5e1;
+      border-radius: 4px;
+      padding: 8px 10px;
+      font-family: inherit;
+      font-size: 13px;
+      resize: vertical;
+      outline: none;
+    }
+    .stella-comment-textarea:focus {
+      border-color: #2563eb;
+      box-shadow: 0 0 0 2px rgba(37,99,235,0.1);
+    }
+  </style>
+</head>
+<body>
+
+  <div class="top-banner">
+    <div class="logo">
+      <span>⭐ Stella Connect (Simulated QA Evaluation)</span>
+      <span class="badge">QA Mode</span>
+    </div>
+    <div class="actions">
+      <span style="font-size: 12px; opacity: 0.85;">No items selected by default</span>
+      <button class="btn-test-bookmarklet" onclick="launchBookmarklet()">🚀 Launch Toast QA Bookmarklet</button>
+    </div>
+  </div>
+
+  <div class="main-container">
+    <!-- Left column: Review Info, Metadata & Transcript -->
+    <div class="sidebar">
+      <div class="card">
+        <div class="review-info">
+          <h2>Sarah Jenkins</h2>
+          <div class="role">Customer Care Specialist • Tier 1 Payroll Support</div>
+        </div>
+
+        <div class="metadata-grid">
+          <div class="meta-item">
+            <h4>Interaction ID</h4>
+            <p>INT-84920418</p>
+          </div>
+          <div class="meta-item">
+            <h4>DNIS</h4>
+            <p>+1 (855) 555-0199</p>
+          </div>
+          <div class="meta-item">
+            <h4>ANI</h4>
+            <p>+1 (617) 555-0144</p>
+          </div>
+          <div class="meta-item">
+            <h4>Call Duration</h4>
+            <p>385.4</p>
+          </div>
+        </div>
+      </div>
+
+      <div class="card transcript-card">
+        <div class="transcript-header">
+          <span>Call / Chat Transcript</span>
+          <span style="font-size: 11px; font-weight: normal; color: #64748b;">Audio Duration: 6m 25s</span>
+        </div>
+        <div class="transcript-content-box">
+          <div class="spec-transcript-content">[00:00] <span class="turn-agent">Sarah:</span> Thank you for calling Toast Support! My name is Sarah. May I have your restaurant name and email address to verify your account?
+[00:15] <span class="turn-cust">Customer:</span> Hi Sarah, this is Mike from Bella Bistro. My email is mike@bellabistro.com.
+[00:27] <span class="turn-agent">Sarah:</span> Thanks Mike, I have your account verified. How can I help you today?
+[00:35] <span class="turn-cust">Customer:</span> We ran payroll this morning, but two of our sous chefs did not receive their direct deposit. Our employees are waiting and I need this sorted out immediately.
+[00:52] <span class="turn-agent">Sarah:</span> I completely understand how urgent this is for your team, Mike. Let me check the Toast Payroll portal logs for today's direct deposit batch. One moment please while I review your payroll batch submission.
+[01:30] <span class="turn-agent">Sarah:</span> Thank you for your patience. I see that the payroll run was approved at 8:45 AM, but the two employees had updated their banking routing numbers yesterday afternoon, which triggered an ACH bank verification hold.
+[02:10] <span class="turn-cust">Customer:</span> Oh! They did update their direct deposit info yesterday. Can we push the deposit through today or will it take until tomorrow?
+[02:25] <span class="turn-agent">Sarah:</span> Since it was updated after the 5:00 PM cutoff, the ACH network re-verifies the pre-note. I can initiate an off-cycle same-day manual check reissue right now from Toast Payroll, or approve an expedited wire transfer so they receive their funds by 3:00 PM today.
+[02:55] <span class="turn-cust">Customer:</span> Expedited wire transfer would be fantastic! That will solve our problem completely.
+[03:15] <span class="turn-agent">Sarah:</span> Perfect, I have processed the expedited wire request with reference ID WIRE-7821. You will also receive an automated email confirmation in 5 minutes. Is there anything else I can help you with today Mike?
+[03:35] <span class="turn-cust">Customer:</span> That's everything, you were super helpful and fast Sarah! Thank you so much!
+[03:45] <span class="turn-agent">Sarah:</span> You're very welcome Mike! Thank you for partnering with Toast, and have a wonderful day!</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Right column: Evaluation Form (4 sections, 23 items, NO BUTTONS SELECTED INITIALLY) -->
+    <div class="qa-form-flow">
+      
+      <div class="padding-xlarge stella-section-card">
+        <h2 class="stella-section-title">Knowledgeable & effective problem-solving</h2>
+        <div class="stella-section-body">
+          
+        <div class="stella-question-item" data-idx="1">
+          <div class="stella-question-header">
+            <span class="stella-question-num">1.</span>
+            <span class="stella-question-text">Investigation ownership & Resource optimization</span>
+          </div>
+          <div class="stella-segmented-control-wrapper" data-testid="SegmentedControl">
+            <button type="button" class="stella-control-btn" data-btn-idx="0" onclick="handleStellaButtonClick(this)">Quality standard excelled</button><button type="button" class="stella-control-btn" data-btn-idx="1" onclick="handleStellaButtonClick(this)">Quality standard met</button><button type="button" class="stella-control-btn" data-btn-idx="2" onclick="handleStellaButtonClick(this)">Quality standard missed</button>
+          </div>
+          <div class="stella-textarea-wrapper" style="display: none; margin-top: 10px;">
+            <label style="font-size: 12px; font-weight: 600; color: #475569; display: block; margin-bottom: 4px;">Feedback / Comments:</label>
+            <textarea class="stella-comment-textarea" placeholder="Enter comments for this item..."></textarea>
+          </div>
+        </div>
+      
+        <div class="stella-question-item" data-idx="2">
+          <div class="stella-question-header">
+            <span class="stella-question-num">2.</span>
+            <span class="stella-question-text">Customer training opportunity taken</span>
+          </div>
+          <div class="stella-segmented-control-wrapper" data-testid="SegmentedControl">
+            <button type="button" class="stella-control-btn" data-btn-idx="0" onclick="handleStellaButtonClick(this)">Quality standard met</button><button type="button" class="stella-control-btn" data-btn-idx="1" onclick="handleStellaButtonClick(this)">Quality standard missed</button>
+          </div>
+          <div class="stella-textarea-wrapper" style="display: none; margin-top: 10px;">
+            <label style="font-size: 12px; font-weight: 600; color: #475569; display: block; margin-bottom: 4px;">Feedback / Comments:</label>
+            <textarea class="stella-comment-textarea" placeholder="Enter comments for this item..."></textarea>
+          </div>
+        </div>
+      
+        <div class="stella-question-item" data-idx="3">
+          <div class="stella-question-header">
+            <span class="stella-question-num">3.</span>
+            <span class="stella-question-text">Confirmed resolution & next steps</span>
+          </div>
+          <div class="stella-segmented-control-wrapper" data-testid="SegmentedControl">
+            <button type="button" class="stella-control-btn" data-btn-idx="0" onclick="handleStellaButtonClick(this)">Quality standard met</button><button type="button" class="stella-control-btn" data-btn-idx="1" onclick="handleStellaButtonClick(this)">Quality standard missed</button>
+          </div>
+          <div class="stella-textarea-wrapper" style="display: none; margin-top: 10px;">
+            <label style="font-size: 12px; font-weight: 600; color: #475569; display: block; margin-bottom: 4px;">Feedback / Comments:</label>
+            <textarea class="stella-comment-textarea" placeholder="Enter comments for this item..."></textarea>
+          </div>
+        </div>
+      
+        <div class="stella-question-item" data-idx="4">
+          <div class="stella-question-header">
+            <span class="stella-question-num">4.</span>
+            <span class="stella-question-text">Escalation/transfer due diligence</span>
+          </div>
+          <div class="stella-segmented-control-wrapper" data-testid="SegmentedControl">
+            <button type="button" class="stella-control-btn" data-btn-idx="0" onclick="handleStellaButtonClick(this)">Quality standard excelled</button><button type="button" class="stella-control-btn" data-btn-idx="1" onclick="handleStellaButtonClick(this)">Quality standard met</button><button type="button" class="stella-control-btn" data-btn-idx="2" onclick="handleStellaButtonClick(this)">Quality standard missed</button>
+          </div>
+          <div class="stella-textarea-wrapper" style="display: none; margin-top: 10px;">
+            <label style="font-size: 12px; font-weight: 600; color: #475569; display: block; margin-bottom: 4px;">Feedback / Comments:</label>
+            <textarea class="stella-comment-textarea" placeholder="Enter comments for this item..."></textarea>
+          </div>
+        </div>
+      
+        <div class="stella-question-item" data-idx="5">
+          <div class="stella-question-header">
+            <span class="stella-question-num">5.</span>
+            <span class="stella-question-text">Internal case notes</span>
+          </div>
+          <div class="stella-segmented-control-wrapper" data-testid="SegmentedControl">
+            <button type="button" class="stella-control-btn" data-btn-idx="0" onclick="handleStellaButtonClick(this)">Quality standard met</button><button type="button" class="stella-control-btn" data-btn-idx="1" onclick="handleStellaButtonClick(this)">Quality standard missed</button>
+          </div>
+          <div class="stella-textarea-wrapper" style="display: none; margin-top: 10px;">
+            <label style="font-size: 12px; font-weight: 600; color: #475569; display: block; margin-bottom: 4px;">Feedback / Comments:</label>
+            <textarea class="stella-comment-textarea" placeholder="Enter comments for this item..."></textarea>
+          </div>
+        </div>
+      
+        <div class="stella-question-item" data-idx="6">
+          <div class="stella-question-header">
+            <span class="stella-question-num">6.</span>
+            <span class="stella-question-text">Major Process Failure: Interaction documentation</span>
+          </div>
+          <div class="stella-segmented-control-wrapper" data-testid="SegmentedControl">
+            <button type="button" class="stella-control-btn" data-btn-idx="0" onclick="handleStellaButtonClick(this)">N/A</button><button type="button" class="stella-control-btn" data-btn-idx="1" onclick="handleStellaButtonClick(this)">Quality standard missed</button>
+          </div>
+          <div class="stella-textarea-wrapper" style="display: none; margin-top: 10px;">
+            <label style="font-size: 12px; font-weight: 600; color: #475569; display: block; margin-bottom: 4px;">Feedback / Comments:</label>
+            <textarea class="stella-comment-textarea" placeholder="Enter comments for this item..."></textarea>
+          </div>
+        </div>
+      
+        <div class="stella-question-item" data-idx="7">
+          <div class="stella-question-header">
+            <span class="stella-question-num">7.</span>
+            <span class="stella-question-text">Case data management</span>
+          </div>
+          <div class="stella-segmented-control-wrapper" data-testid="SegmentedControl">
+            <button type="button" class="stella-control-btn" data-btn-idx="0" onclick="handleStellaButtonClick(this)">Quality standard met</button><button type="button" class="stella-control-btn" data-btn-idx="1" onclick="handleStellaButtonClick(this)">Quality standard missed</button>
+          </div>
+          <div class="stella-textarea-wrapper" style="display: none; margin-top: 10px;">
+            <label style="font-size: 12px; font-weight: 600; color: #475569; display: block; margin-bottom: 4px;">Feedback / Comments:</label>
+            <textarea class="stella-comment-textarea" placeholder="Enter comments for this item..."></textarea>
+          </div>
+        </div>
+      
+        <div class="stella-question-item" data-idx="8">
+          <div class="stella-question-header">
+            <span class="stella-question-num">8.</span>
+            <span class="stella-question-text">Major Process Failure: Survey avoidance/ manipulation</span>
+          </div>
+          <div class="stella-segmented-control-wrapper" data-testid="SegmentedControl">
+            <button type="button" class="stella-control-btn" data-btn-idx="0" onclick="handleStellaButtonClick(this)">N/A</button><button type="button" class="stella-control-btn" data-btn-idx="1" onclick="handleStellaButtonClick(this)">Quality standard missed</button>
+          </div>
+          <div class="stella-textarea-wrapper" style="display: none; margin-top: 10px;">
+            <label style="font-size: 12px; font-weight: 600; color: #475569; display: block; margin-bottom: 4px;">Feedback / Comments:</label>
+            <textarea class="stella-comment-textarea" placeholder="Enter comments for this item..."></textarea>
+          </div>
+        </div>
+      
+        </div>
+      </div>
+    
+      <div class="padding-xlarge stella-section-card">
+        <h2 class="stella-section-title">Empathy & rapport</h2>
+        <div class="stella-section-body">
+          
+        <div class="stella-question-item" data-idx="1">
+          <div class="stella-question-header">
+            <span class="stella-question-num">1.</span>
+            <span class="stella-question-text">Major Process: De-escalation</span>
+          </div>
+          <div class="stella-segmented-control-wrapper" data-testid="SegmentedControl">
+            <button type="button" class="stella-control-btn" data-btn-idx="0" onclick="handleStellaButtonClick(this)">N/A</button><button type="button" class="stella-control-btn" data-btn-idx="1" onclick="handleStellaButtonClick(this)">Quality standard missed</button>
+          </div>
+          <div class="stella-textarea-wrapper" style="display: none; margin-top: 10px;">
+            <label style="font-size: 12px; font-weight: 600; color: #475569; display: block; margin-bottom: 4px;">Feedback / Comments:</label>
+            <textarea class="stella-comment-textarea" placeholder="Enter comments for this item..."></textarea>
+          </div>
+        </div>
+      
+        <div class="stella-question-item" data-idx="2">
+          <div class="stella-question-header">
+            <span class="stella-question-num">2.</span>
+            <span class="stella-question-text">Customer Sentiment Acknowledgement</span>
+          </div>
+          <div class="stella-segmented-control-wrapper" data-testid="SegmentedControl">
+            <button type="button" class="stella-control-btn" data-btn-idx="0" onclick="handleStellaButtonClick(this)">Quality standard met</button><button type="button" class="stella-control-btn" data-btn-idx="1" onclick="handleStellaButtonClick(this)">Quality standard missed</button>
+          </div>
+          <div class="stella-textarea-wrapper" style="display: none; margin-top: 10px;">
+            <label style="font-size: 12px; font-weight: 600; color: #475569; display: block; margin-bottom: 4px;">Feedback / Comments:</label>
+            <textarea class="stella-comment-textarea" placeholder="Enter comments for this item..."></textarea>
+          </div>
+        </div>
+      
+        <div class="stella-question-item" data-idx="3">
+          <div class="stella-question-header">
+            <span class="stella-question-num">3.</span>
+            <span class="stella-question-text">Effective listening & information acknowledgement</span>
+          </div>
+          <div class="stella-segmented-control-wrapper" data-testid="SegmentedControl">
+            <button type="button" class="stella-control-btn" data-btn-idx="0" onclick="handleStellaButtonClick(this)">Quality standard met</button><button type="button" class="stella-control-btn" data-btn-idx="1" onclick="handleStellaButtonClick(this)">Quality standard missed</button>
+          </div>
+          <div class="stella-textarea-wrapper" style="display: none; margin-top: 10px;">
+            <label style="font-size: 12px; font-weight: 600; color: #475569; display: block; margin-bottom: 4px;">Feedback / Comments:</label>
+            <textarea class="stella-comment-textarea" placeholder="Enter comments for this item..."></textarea>
+          </div>
+        </div>
+      
+        <div class="stella-question-item" data-idx="4">
+          <div class="stella-question-header">
+            <span class="stella-question-num">4.</span>
+            <span class="stella-question-text">Internal collaboration</span>
+          </div>
+          <div class="stella-segmented-control-wrapper" data-testid="SegmentedControl">
+            <button type="button" class="stella-control-btn" data-btn-idx="0" onclick="handleStellaButtonClick(this)">Quality standard excelled</button><button type="button" class="stella-control-btn" data-btn-idx="1" onclick="handleStellaButtonClick(this)">Quality standard met</button><button type="button" class="stella-control-btn" data-btn-idx="2" onclick="handleStellaButtonClick(this)">Quality standard missed</button>
+          </div>
+          <div class="stella-textarea-wrapper" style="display: none; margin-top: 10px;">
+            <label style="font-size: 12px; font-weight: 600; color: #475569; display: block; margin-bottom: 4px;">Feedback / Comments:</label>
+            <textarea class="stella-comment-textarea" placeholder="Enter comments for this item..."></textarea>
+          </div>
+        </div>
+      
+        <div class="stella-question-item" data-idx="5">
+          <div class="stella-question-header">
+            <span class="stella-question-num">5.</span>
+            <span class="stella-question-text">Tone of response</span>
+          </div>
+          <div class="stella-segmented-control-wrapper" data-testid="SegmentedControl">
+            <button type="button" class="stella-control-btn" data-btn-idx="0" onclick="handleStellaButtonClick(this)">Quality standard excelled</button><button type="button" class="stella-control-btn" data-btn-idx="1" onclick="handleStellaButtonClick(this)">Quality standard met</button><button type="button" class="stella-control-btn" data-btn-idx="2" onclick="handleStellaButtonClick(this)">Quality standard missed</button>
+          </div>
+          <div class="stella-textarea-wrapper" style="display: none; margin-top: 10px;">
+            <label style="font-size: 12px; font-weight: 600; color: #475569; display: block; margin-bottom: 4px;">Feedback / Comments:</label>
+            <textarea class="stella-comment-textarea" placeholder="Enter comments for this item..."></textarea>
+          </div>
+        </div>
+      
+        <div class="stella-question-item" data-idx="6">
+          <div class="stella-question-header">
+            <span class="stella-question-num">6.</span>
+            <span class="stella-question-text">Intentional Customer Mistreat</span>
+          </div>
+          <div class="stella-segmented-control-wrapper" data-testid="SegmentedControl">
+            <button type="button" class="stella-control-btn" data-btn-idx="0" onclick="handleStellaButtonClick(this)">Rude or unprofessional behavior</button><button type="button" class="stella-control-btn" data-btn-idx="1" onclick="handleStellaButtonClick(this)">Hanging up on a customer or manually closing a chat</button><button type="button" class="stella-control-btn" data-btn-idx="2" onclick="handleStellaButtonClick(this)">Repeated toggling of ready state to place self in the back of the call queue</button><button type="button" class="stella-control-btn" data-btn-idx="3" onclick="handleStellaButtonClick(this)">Excessive long silence or hold times without acknowledging the customer that result in the customer disconnecting the interaction</button><button type="button" class="stella-control-btn" data-btn-idx="4" onclick="handleStellaButtonClick(this)">Conducting personal business while on a call with a customer (i.e. having personal conversations)</button><button type="button" class="stella-control-btn" data-btn-idx="5" onclick="handleStellaButtonClick(this)">Denied tranfers</button><button type="button" class="stella-control-btn" data-btn-idx="6" onclick="handleStellaButtonClick(this)">N/A</button>
+          </div>
+          <div class="stella-textarea-wrapper" style="display: none; margin-top: 10px;">
+            <label style="font-size: 12px; font-weight: 600; color: #475569; display: block; margin-bottom: 4px;">Feedback / Comments:</label>
+            <textarea class="stella-comment-textarea" placeholder="Enter comments for this item..."></textarea>
+          </div>
+        </div>
+      
+        </div>
+      </div>
+    
+      <div class="padding-xlarge stella-section-card">
+        <h2 class="stella-section-title">Responsive & consistent interactions</h2>
+        <div class="stella-section-body">
+          
+        <div class="stella-question-item" data-idx="1">
+          <div class="stella-question-header">
+            <span class="stella-question-num">1.</span>
+            <span class="stella-question-text">Interaction customer communication</span>
+          </div>
+          <div class="stella-segmented-control-wrapper" data-testid="SegmentedControl">
+            <button type="button" class="stella-control-btn" data-btn-idx="0" onclick="handleStellaButtonClick(this)">Quality standard met</button><button type="button" class="stella-control-btn" data-btn-idx="1" onclick="handleStellaButtonClick(this)">Quality standard missed</button>
+          </div>
+          <div class="stella-textarea-wrapper" style="display: none; margin-top: 10px;">
+            <label style="font-size: 12px; font-weight: 600; color: #475569; display: block; margin-bottom: 4px;">Feedback / Comments:</label>
+            <textarea class="stella-comment-textarea" placeholder="Enter comments for this item..."></textarea>
+          </div>
+        </div>
+      
+        <div class="stella-question-item" data-idx="2">
+          <div class="stella-question-header">
+            <span class="stella-question-num">2.</span>
+            <span class="stella-question-text">Major Process Failure: Excessive response time (over 8 minutes)</span>
+          </div>
+          <div class="stella-segmented-control-wrapper" data-testid="SegmentedControl">
+            <button type="button" class="stella-control-btn" data-btn-idx="0" onclick="handleStellaButtonClick(this)">N/A</button><button type="button" class="stella-control-btn" data-btn-idx="1" onclick="handleStellaButtonClick(this)">Quality standard missed</button>
+          </div>
+          <div class="stella-textarea-wrapper" style="display: none; margin-top: 10px;">
+            <label style="font-size: 12px; font-weight: 600; color: #475569; display: block; margin-bottom: 4px;">Feedback / Comments:</label>
+            <textarea class="stella-comment-textarea" placeholder="Enter comments for this item..."></textarea>
+          </div>
+        </div>
+      
+        <div class="stella-question-item" data-idx="3">
+          <div class="stella-question-header">
+            <span class="stella-question-num">3.</span>
+            <span class="stella-question-text">Case customer communication</span>
+          </div>
+          <div class="stella-segmented-control-wrapper" data-testid="SegmentedControl">
+            <button type="button" class="stella-control-btn" data-btn-idx="0" onclick="handleStellaButtonClick(this)">Quality standard met</button><button type="button" class="stella-control-btn" data-btn-idx="1" onclick="handleStellaButtonClick(this)">Quality standard missed</button>
+          </div>
+          <div class="stella-textarea-wrapper" style="display: none; margin-top: 10px;">
+            <label style="font-size: 12px; font-weight: 600; color: #475569; display: block; margin-bottom: 4px;">Feedback / Comments:</label>
+            <textarea class="stella-comment-textarea" placeholder="Enter comments for this item..."></textarea>
+          </div>
+        </div>
+      
+        <div class="stella-question-item" data-idx="4">
+          <div class="stella-question-header">
+            <span class="stella-question-num">4.</span>
+            <span class="stella-question-text">Major Process Failure: Waiting on agent action</span>
+          </div>
+          <div class="stella-segmented-control-wrapper" data-testid="SegmentedControl">
+            <button type="button" class="stella-control-btn" data-btn-idx="0" onclick="handleStellaButtonClick(this)">N/A</button><button type="button" class="stella-control-btn" data-btn-idx="1" onclick="handleStellaButtonClick(this)">Quality standard missed</button>
+          </div>
+          <div class="stella-textarea-wrapper" style="display: none; margin-top: 10px;">
+            <label style="font-size: 12px; font-weight: 600; color: #475569; display: block; margin-bottom: 4px;">Feedback / Comments:</label>
+            <textarea class="stella-comment-textarea" placeholder="Enter comments for this item..."></textarea>
+          </div>
+        </div>
+      
+        <div class="stella-question-item" data-idx="5">
+          <div class="stella-question-header">
+            <span class="stella-question-num">5.</span>
+            <span class="stella-question-text">Negligent Customer Mistreat</span>
+          </div>
+          <div class="stella-segmented-control-wrapper" data-testid="SegmentedControl">
+            <button type="button" class="stella-control-btn" data-btn-idx="0" onclick="handleStellaButtonClick(this)">Poor case management/hygiene</button><button type="button" class="stella-control-btn" data-btn-idx="1" onclick="handleStellaButtonClick(this)">Case closed before resolution reached</button><button type="button" class="stella-control-btn" data-btn-idx="2" onclick="handleStellaButtonClick(this)">Call drops and agent does not call the customer back</button><button type="button" class="stella-control-btn" data-btn-idx="3" onclick="handleStellaButtonClick(this)">Failure to appropriately document customer interaction</button><button type="button" class="stella-control-btn" data-btn-idx="4" onclick="handleStellaButtonClick(this)">Failing to probe the customer's need and unnecessary transferring of the call</button><button type="button" class="stella-control-btn" data-btn-idx="5" onclick="handleStellaButtonClick(this)">Not adhering to required customer authentication procedures or other essential security processes</button><button type="button" class="stella-control-btn" data-btn-idx="6" onclick="handleStellaButtonClick(this)">N/A</button>
+          </div>
+          <div class="stella-textarea-wrapper" style="display: none; margin-top: 10px;">
+            <label style="font-size: 12px; font-weight: 600; color: #475569; display: block; margin-bottom: 4px;">Feedback / Comments:</label>
+            <textarea class="stella-comment-textarea" placeholder="Enter comments for this item..."></textarea>
+          </div>
+        </div>
+      
+        </div>
+      </div>
+    
+      <div class="padding-xlarge stella-section-card">
+        <h2 class="stella-section-title">Personalization</h2>
+        <div class="stella-section-body">
+          
+        <div class="stella-question-item" data-idx="1">
+          <div class="stella-question-header">
+            <span class="stella-question-num">1.</span>
+            <span class="stella-question-text">Customer background information</span>
+          </div>
+          <div class="stella-segmented-control-wrapper" data-testid="SegmentedControl">
+            <button type="button" class="stella-control-btn" data-btn-idx="0" onclick="handleStellaButtonClick(this)">Quality standard met</button><button type="button" class="stella-control-btn" data-btn-idx="1" onclick="handleStellaButtonClick(this)">Quality standard missed</button>
+          </div>
+          <div class="stella-textarea-wrapper" style="display: none; margin-top: 10px;">
+            <label style="font-size: 12px; font-weight: 600; color: #475569; display: block; margin-bottom: 4px;">Feedback / Comments:</label>
+            <textarea class="stella-comment-textarea" placeholder="Enter comments for this item..."></textarea>
+          </div>
+        </div>
+      
+        <div class="stella-question-item" data-idx="2">
+          <div class="stella-question-header">
+            <span class="stella-question-num">2.</span>
+            <span class="stella-question-text">Contact preferences</span>
+          </div>
+          <div class="stella-segmented-control-wrapper" data-testid="SegmentedControl">
+            <button type="button" class="stella-control-btn" data-btn-idx="0" onclick="handleStellaButtonClick(this)">Quality standard met</button><button type="button" class="stella-control-btn" data-btn-idx="1" onclick="handleStellaButtonClick(this)">Quality standard missed</button>
+          </div>
+          <div class="stella-textarea-wrapper" style="display: none; margin-top: 10px;">
+            <label style="font-size: 12px; font-weight: 600; color: #475569; display: block; margin-bottom: 4px;">Feedback / Comments:</label>
+            <textarea class="stella-comment-textarea" placeholder="Enter comments for this item..."></textarea>
+          </div>
+        </div>
+      
+        <div class="stella-question-item" data-idx="3">
+          <div class="stella-question-header">
+            <span class="stella-question-num">3.</span>
+            <span class="stella-question-text">Account & previous case review</span>
+          </div>
+          <div class="stella-segmented-control-wrapper" data-testid="SegmentedControl">
+            <button type="button" class="stella-control-btn" data-btn-idx="0" onclick="handleStellaButtonClick(this)">Quality standard met</button><button type="button" class="stella-control-btn" data-btn-idx="1" onclick="handleStellaButtonClick(this)">Quality standard missed</button>
+          </div>
+          <div class="stella-textarea-wrapper" style="display: none; margin-top: 10px;">
+            <label style="font-size: 12px; font-weight: 600; color: #475569; display: block; margin-bottom: 4px;">Feedback / Comments:</label>
+            <textarea class="stella-comment-textarea" placeholder="Enter comments for this item..."></textarea>
+          </div>
+        </div>
+      
+        <div class="stella-question-item" data-idx="4">
+          <div class="stella-question-header">
+            <span class="stella-question-num">4.</span>
+            <span class="stella-question-text">Toast greeting & closing</span>
+          </div>
+          <div class="stella-segmented-control-wrapper" data-testid="SegmentedControl">
+            <button type="button" class="stella-control-btn" data-btn-idx="0" onclick="handleStellaButtonClick(this)">Quality standard met</button><button type="button" class="stella-control-btn" data-btn-idx="1" onclick="handleStellaButtonClick(this)">Quality standard missed</button>
+          </div>
+          <div class="stella-textarea-wrapper" style="display: none; margin-top: 10px;">
+            <label style="font-size: 12px; font-weight: 600; color: #475569; display: block; margin-bottom: 4px;">Feedback / Comments:</label>
+            <textarea class="stella-comment-textarea" placeholder="Enter comments for this item..."></textarea>
+          </div>
+        </div>
+      
+        </div>
+      </div>
+    
+    </div>
+  </div>
+
+  <script>
+    // Handles clicking buttons in the simulated Stella Connect SegmentedControl
+    function handleStellaButtonClick(btn) {
+      const parentControl = btn.closest('[data-testid="SegmentedControl"]');
+      const questionItem = btn.closest('.stella-question-item');
+      if (!parentControl || !questionItem) return;
+
+      // Toggle active styling
+      Array.from(parentControl.querySelectorAll('.stella-control-btn')).forEach(b => b.classList.remove('active'));
+      btn.classList.add('active');
+
+      // Reveal comment textarea when a button is clicked
+      const textareaWrapper = questionItem.querySelector('.stella-textarea-wrapper');
+      if (textareaWrapper) {
+        textareaWrapper.style.display = 'block';
+      }
+    }
+
+    // Direct launcher for the bookmarklet on this test page
+    function launchBookmarklet() {
+      // Remove any existing overlay first
+      const existing = document.getElementById('qa-modal-overlay');
+      if (existing) existing.remove();
+
+      // Load bookmarklet.js locally
+      const script = document.createElement('script');
+      script.src = 'bookmarklet.js?v=' + Date.now();
+      document.body.appendChild(script);
+    }
+  </script>
+</body>
+</html>
