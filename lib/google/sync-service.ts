@@ -88,19 +88,21 @@ export async function syncAssignments(
   if (!rows || rows.length === 0) return 0;
 
   const records = rows
-    .filter((r) => r.ID && r["QA Email"])
+    .filter((r) => (r.ID || r.id) && (r["QA Email"] || r.qaEmail || r.qa_email))
     .map((r) => ({
-      id: String(r.ID).trim(),
-      date: normalizeDate(r.Date),
-      qa_email: String(r["QA Email"]).trim().toLowerCase(),
-      agent_email: String(r["Agent Email"] || "").trim().toLowerCase(),
-      agent_snapshot: safeJsonParse(r["Agent Snapshot"]),
-      rubric_id: r["Rubric ID"] || null,
-      status: r.Status || "Pending",
-      swap_data: r["Swap Data"] ? safeJsonParse(r["Swap Data"]) : null,
-      assigned_by: r["Assigned By"] || null,
-      evaluation_type: r["Evaluation Type"] || "Manual Audit",
-      timestamp: r.Timestamp || new Date().toISOString(),
+      id: String(r.ID || r.id).trim(),
+      date: normalizeDate(r.Date || r.date),
+      qa_email: String(r["QA Email"] || r.qaEmail || r.qa_email).trim().toLowerCase(),
+      agent_email: String(r["Agent Email"] || r.agentEmail || r.agent_email || "").trim().toLowerCase(),
+      agent_snapshot: safeJsonParse(r["Agent Snapshot"] || r.agentSnapshot || r.agent_snapshot),
+      rubric_id: r["Rubric ID"] || r.rubricId || r.rubric_id || null,
+      status: r.Status || r.status || "Pending",
+      swap_data: r["Swap Data"]
+        ? safeJsonParse(r["Swap Data"])
+        : (r.swapData ? safeJsonParse(r.swapData) : null),
+      assigned_by: r["Assigned By"] || r.assignedBy || r.assigned_by || null,
+      evaluation_type: r["Evaluation Type"] || r.evaluationType || r.evaluation_type || "Manual Audit",
+      timestamp: r.Timestamp || r.timestamp || new Date().toISOString(),
       synced_at: new Date().toISOString(),
     }));
 
@@ -191,17 +193,17 @@ export async function syncRubrics(
   if (!rows || rows.length === 0) return 0;
 
   const records = rows
-    .filter((r) => r.ID && r.Name)
+    .filter((r) => (r.ID || r.id) && (r.Name || r.name))
     .map((r) => ({
-      id: String(r.ID).trim(),
-      name: r.Name.trim(),
-      structure: safeJsonParse(r.Structure, []),
-      version: parseInt(r.Version) || 1,
-      status: r.Status || "Active",
+      id: String(r.ID || r.id).trim(),
+      name: String(r.Name || r.name).trim(),
+      structure: safeJsonParse(r.Structure || r.structure, []),
+      version: parseInt(r.Version || r.version) || 1,
+      status: r.Status || r.status || "Active",
       is_default:
-        String(r["Is Default"]).toLowerCase() === "true" ||
-        String(r["Is Default"]) === "1",
-      created_at: r["Created At"] || new Date().toISOString(),
+        String(r["Is Default"] || r.is_default || r.isDefault).toLowerCase() === "true" ||
+        String(r["Is Default"] || r.is_default || r.isDefault) === "1",
+      created_at: r["Created At"] || r.created_at || new Date().toISOString(),
       synced_at: new Date().toISOString(),
     }));
 
@@ -261,16 +263,16 @@ export async function syncFeedbackTemplates(
   if (!rows || rows.length === 0) return 0;
 
   const records = rows
-    .filter((r) => (r.ID || r.id) && (r["Feedback Text"] || r.feedback_text))
+    .filter((r) => (r.ID || r.id) && (r["Feedback Text"] || r.feedback_text || r.feedbackText))
     .map((r) => ({
       id: String(r.ID || r.id).trim(),
-      created_by: r["Created By"] || r.created_by || null,
-      rubric_id: r["Rubric ID"] || r.rubric_id || null,
-      section_index: parseInt(r["Section Index"] ?? r.section_index) || 0,
-      item_index: parseInt(r["Item Index"] ?? r.item_index) || 0,
-      option_index: parseInt(r["Option Index"] ?? r.option_index) || 0,
-      button_label: (r["Button Label"] || r.button_label || "").trim() || null,
-      feedback_text: String(r["Feedback Text"] || r.feedback_text).trim(),
+      created_by: r["Created By"] || r.created_by || r.createdBy || null,
+      rubric_id: r["Rubric ID"] || r.rubric_id || r.rubricId || null,
+      section_index: parseInt(r["Section Index"] ?? r.section_index ?? r.sectionIndex) || 0,
+      item_index: parseInt(r["Item Index"] ?? r.item_index ?? r.itemIndex) || 0,
+      option_index: parseInt(r["Option Index"] ?? r.option_index ?? r.optionIndex) || 0,
+      button_label: (r["Button Label"] || r.button_label || r.buttonLabel || "").trim() || null,
+      feedback_text: String(r["Feedback Text"] || r.feedback_text || r.feedbackText).trim(),
       created_at: r["Created At"] || r.created_at || new Date().toISOString(),
       updated_at: r["Last Updated"] || r.updated_at || new Date().toISOString(),
       synced_at: new Date().toISOString(),

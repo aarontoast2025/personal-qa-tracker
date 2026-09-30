@@ -6,6 +6,7 @@ import { extractSheetId } from "@/lib/google/sheets";
 
 export async function saveGoogleSheetId(formData: FormData) {
   const rawInput = (formData.get("google_sheet_id") as string) || "";
+  const webAppUrlInput = ((formData.get("google_web_app_url") as string) || "").trim();
   const sheetId = extractSheetId(rawInput);
 
   if (!sheetId) {
@@ -24,24 +25,40 @@ export async function saveGoogleSheetId(formData: FormData) {
     .limit(1)
     .maybeSingle();
 
+  const updatePayload: Record<string, any> = {
+    google_sheet_id: sheetId,
+    user_id: user?.id,
+    updated_at: new Date().toISOString(),
+  };
+  if (webAppUrlInput) {
+    updatePayload.google_web_app_url = webAppUrlInput;
+  }
+
   let error;
   if (existing) {
     const res = await supabase
       .from("app_settings")
-      .update({
-        google_sheet_id: sheetId,
-        user_id: user?.id,
-        updated_at: new Date().toISOString(),
-      })
+      .update(updatePayload)
       .eq("id", existing.id);
-    error = res.error;
+    if (res.error && res.error.message?.includes("google_web_app_url")) {
+      delete updatePayload.google_web_app_url;
+      const retry = await supabase
+        .from("app_settings")
+        .update(updatePayload)
+        .eq("id", existing.id);
+      error = retry.error;
+    } else {
+      error = res.error;
+    }
   } else {
-    const res = await supabase.from("app_settings").insert({
-      google_sheet_id: sheetId,
-      user_id: user?.id,
-      updated_at: new Date().toISOString(),
-    });
-    error = res.error;
+    const res = await supabase.from("app_settings").insert(updatePayload);
+    if (res.error && res.error.message?.includes("google_web_app_url")) {
+      delete updatePayload.google_web_app_url;
+      const retry = await supabase.from("app_settings").insert(updatePayload);
+      error = retry.error;
+    } else {
+      error = res.error;
+    }
   }
 
   if (error) {

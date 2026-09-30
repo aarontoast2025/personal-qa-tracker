@@ -1,5 +1,6 @@
 import { createClient } from "@/lib/supabase/server";
 import { SettingsForm } from "@/components/settings/settings-form";
+import { DEFAULT_WEB_APP_URL } from "@/lib/google/web-app-client";
 
 export default async function SettingsPage() {
   const supabase = await createClient();
@@ -22,7 +23,7 @@ export default async function SettingsPage() {
     supabase.from("agents").select("*", { count: "exact", head: true }),
     supabase
       .from("app_settings")
-      .select("google_sheet_id, gemini_api_key")
+      .select("*")
       .limit(1)
       .maybeSingle(),
     supabase.auth.getUser(),
@@ -55,6 +56,7 @@ export default async function SettingsPage() {
 
       <SettingsForm
         initialSheetId={settings?.google_sheet_id || ""}
+        initialWebAppUrl={(settings as any)?.google_web_app_url || DEFAULT_WEB_APP_URL}
         initialGeminiKey={settings?.gemini_api_key || ""}
         userEmail={userEmail}
         userName={userName}

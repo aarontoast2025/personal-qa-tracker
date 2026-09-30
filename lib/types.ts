@@ -100,6 +100,7 @@ export interface AppSettings {
   google_service_account_email?: string;
   google_private_key?: string;
   google_apps_script_url?: string;
+  google_web_app_url?: string;
   gemini_api_key?: string;
   gemini_model?: string;
   updated_at?: string;

@@ -1,7 +1,6 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import Link from "next/link";
 import { createClient } from "@/lib/supabase/client";
 import { Assignment } from "@/lib/types";
 import { ViewMode, getDateRange } from "@/lib/date-utils";
@@ -14,7 +13,9 @@ import {
   Clock,
   ExternalLink,
   Filter,
+  Loader2,
   Search,
+  UploadCloud,
 } from "lucide-react";
 
 interface AssignmentsViewProps {
@@ -46,6 +47,7 @@ export function AssignmentsView({ userEmail }: AssignmentsViewProps) {
   const [statusFilter, setStatusFilter] = useState<string>("all");
   const [searchQuery, setSearchQuery] = useState("");
   const [syncNotice, setSyncNotice] = useState<string | null>(null);
+  const [pushingId, setPushingId] = useState<string | null>(null);
 
   const { startStr, endStr } = getDateRange(currentDate, mode);
 
@@ -103,6 +105,36 @@ export function AssignmentsView({ userEmail }: AssignmentsViewProps) {
     setSyncNotice("Google Sheet data successfully fetched and stored in Supabase!");
     setTimeout(() => setSyncNotice(null), 5000);
     loadAssignments();
+  }
+
+  // Handle pushing a Partial assignment to Google Sheet
+  async function handlePush(asgId: string) {
+    if (pushingId) return;
+    setPushingId(asgId);
+
+    try {
+      const res = await fetch("/api/assignments/push", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ assignmentId: asgId }),
+      });
+      const data = await res.json();
+
+      if (!res.ok || !data.success) {
+        throw new Error(data.error || "Failed to push evaluation to Google Sheet");
+      }
+
+      setAssignments((prev) =>
+        prev.map((a) => (a.id === asgId ? { ...a, status: "Completed" } : a))
+      );
+      setSyncNotice(`Assignment ${asgId} successfully pushed to Google Sheet and marked Completed!`);
+      setTimeout(() => setSyncNotice(null), 5000);
+    } catch (err: any) {
+      console.error("Push error:", err);
+      alert(err.message || "Failed to push evaluation to Google Sheet.");
+    } finally {
+      setPushingId(null);
+    }
   }
 
   // Filtered by status and search
@@ -345,16 +377,34 @@ export function AssignmentsView({ userEmail }: AssignmentsViewProps) {
                         </span>
                       </td>
                       <td className="py-3.5 px-4 text-right whitespace-nowrap">
-                        <Link
-                          href={`/assignments/${asg.id}/evaluate`}
-                          className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl font-medium text-xs transition-colors ${
-                            asg.status === "Completed"
-                              ? "bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300 hover:bg-slate-200"
-                              : "bg-amber-500 hover:bg-amber-600 active:bg-amber-700 text-slate-950 font-semibold shadow-sm"
-                          }`}
-                        >
-                          {asg.status === "Completed" ? "View Audit" : "Evaluate"}
-                        </Link>
+                        {asg.status === "Partial" ? (
+                          <button
+                            type="button"
+                            onClick={() => handlePush(asg.id)}
+                            disabled={pushingId === asg.id}
+                            title="Push evaluated record to Google Sheet"
+                            className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl font-semibold text-xs bg-blue-600 hover:bg-blue-700 active:bg-blue-800 text-white shadow-sm transition-all disabled:opacity-50"
+                          >
+                            {pushingId === asg.id ? (
+                              <>
+                                <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                                <span>Pushing...</span>
+                              </>
+                            ) : (
+                              <>
+                                <UploadCloud className="w-3.5 h-3.5" />
+                                <span>Push</span>
+                              </>
+                            )}
+                          </button>
+                        ) : asg.status === "Completed" ? (
+                          <span className="inline-flex items-center gap-1 text-[11px] font-medium text-emerald-600 dark:text-emerald-400">
+                            <CheckCircle2 className="w-3.5 h-3.5" />
+                            Done
+                          </span>
+                        ) : (
+                          <span className="text-slate-400 dark:text-slate-500 text-xs">-</span>
+                        )}
                       </td>
                     </tr>
                   );

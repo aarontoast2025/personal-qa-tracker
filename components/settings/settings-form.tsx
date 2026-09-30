@@ -3,6 +3,7 @@
 import { useState, useRef, useEffect } from "react";
 import { saveGoogleSheetId, saveGeminiApiKey } from "@/app/(dashboard)/settings/actions";
 import {
+  Activity,
   CheckCircle2,
   FileSpreadsheet,
   Save,
@@ -20,9 +21,11 @@ import {
   RefreshCw,
   User,
 } from "lucide-react";
+import { DEFAULT_WEB_APP_URL } from "@/lib/google/web-app-client";
 
 interface SettingsFormProps {
   initialSheetId: string;
+  initialWebAppUrl?: string;
   initialGeminiKey?: string;
   userEmail?: string;
   userName?: string;
@@ -38,12 +41,20 @@ interface SettingsFormProps {
 
 export function SettingsForm({
   initialSheetId,
+  initialWebAppUrl = DEFAULT_WEB_APP_URL,
   initialGeminiKey = "",
   userEmail = "",
   userName = "",
   initialCounts,
 }: SettingsFormProps) {
   const [sheetId, setSheetId] = useState(initialSheetId);
+  const [webAppUrl, setWebAppUrl] = useState(initialWebAppUrl || DEFAULT_WEB_APP_URL);
+  const [isTestingConnection, setIsTestingConnection] = useState(false);
+  const [testConnectionResult, setTestConnectionResult] = useState<{
+    success: boolean;
+    message: string;
+    latencyMs?: number;
+  } | null>(null);
   const [geminiKey, setGeminiKey] = useState(initialGeminiKey);
   const [origin, setOrigin] = useState("https://personal-qa-tracker.vercel.app");
   const [counts, setCounts] = useState(
@@ -83,6 +94,43 @@ export function SettingsForm({
       bookmarkletRef.current.setAttribute("href", bookmarkletCode);
     }
   }, [bookmarkletCode]);
+
+  async function handleTestConnection() {
+    setIsTestingConnection(true);
+    setTestConnectionResult(null);
+
+    try {
+      const res = await fetch("/api/settings/test-connection", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          webAppUrl,
+          sheetId,
+        }),
+      });
+      const data = await res.json();
+      if (!res.ok || !data.success) {
+        setTestConnectionResult({
+          success: false,
+          message: data.error || "Connection test failed.",
+          latencyMs: data.latencyMs,
+        });
+      } else {
+        setTestConnectionResult({
+          success: true,
+          message: data.message || "Connected successfully!",
+          latencyMs: data.latencyMs,
+        });
+      }
+    } catch (err: any) {
+      setTestConnectionResult({
+        success: false,
+        message: err.message || "Failed to test connection to Google Apps Script.",
+      });
+    } finally {
+      setIsTestingConnection(false);
+    }
+  }
 
   async function handleSaveSheet(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault();
@@ -233,6 +281,56 @@ export function SettingsForm({
             </p>
           </div>
 
+          <div>
+            <label
+              htmlFor="google_web_app_url"
+              className="block text-xs font-medium text-slate-700 dark:text-slate-300 mb-1.5"
+            >
+              Google Script Web App URL (Integration Bridge)
+            </label>
+            <div className="relative">
+              <input
+                id="google_web_app_url"
+                name="google_web_app_url"
+                type="text"
+                value={webAppUrl}
+                onChange={(e) => setWebAppUrl(e.target.value)}
+                placeholder="https://script.google.com/macros/s/.../exec"
+                className="w-full px-3.5 py-2.5 text-xs font-mono rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 text-slate-900 dark:text-white placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-amber-500/20 focus:border-amber-500"
+              />
+            </div>
+            <p className="text-[11px] text-slate-400 dark:text-slate-500 mt-1.5">
+              Secure bridge used to read domain-restricted Toast spreadsheets and push evaluations without 401 errors.
+            </p>
+          </div>
+
+          {testConnectionResult && (
+            <div
+              className={`p-3.5 rounded-xl text-xs flex items-start gap-2.5 ${
+                testConnectionResult.success
+                  ? "bg-emerald-50 dark:bg-emerald-950/40 border border-emerald-200 dark:border-emerald-800 text-emerald-800 dark:text-emerald-300"
+                  : "bg-rose-50 dark:bg-rose-950/40 border border-rose-200 dark:border-rose-800 text-rose-800 dark:text-rose-300"
+              }`}
+            >
+              {testConnectionResult.success ? (
+                <CheckCircle2 className="w-4 h-4 text-emerald-600 mt-0.5 flex-shrink-0" />
+              ) : (
+                <ShieldAlert className="w-4 h-4 text-rose-600 mt-0.5 flex-shrink-0" />
+              )}
+              <div className="flex-1">
+                <div className="font-semibold">
+                  {testConnectionResult.success ? "Connection Verified" : "Connection Failed"}
+                </div>
+                <div className="mt-0.5 text-[11px] opacity-90">{testConnectionResult.message}</div>
+                {testConnectionResult.latencyMs !== undefined && (
+                  <div className="mt-1 font-mono text-[10px] text-emerald-700 dark:text-emerald-400">
+                    ⚡ Latency: {testConnectionResult.latencyMs}ms | Apps Script: Responsive
+                  </div>
+                )}
+              </div>
+            </div>
+          )}
+
           <div className="flex items-center justify-between pt-2">
             <div className="text-xs text-slate-500">
               Status:{" "}
@@ -247,14 +345,30 @@ export function SettingsForm({
               )}
             </div>
 
-            <button
-              type="submit"
-              disabled={isSavingSheet}
-              className="inline-flex items-center gap-2 px-4 py-2 rounded-xl bg-amber-500 hover:bg-amber-600 active:bg-amber-700 text-slate-950 font-semibold text-xs transition-colors disabled:opacity-50"
-            >
-              <Save className="w-3.5 h-3.5" />
-              {isSavingSheet ? "Saving..." : "Save Sheet ID"}
-            </button>
+            <div className="flex items-center gap-2">
+              <button
+                type="button"
+                onClick={handleTestConnection}
+                disabled={isTestingConnection}
+                className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-xl bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-200 font-medium text-xs transition-colors disabled:opacity-50"
+              >
+                <Activity
+                  className={`w-3.5 h-3.5 ${
+                    isTestingConnection ? "animate-spin text-amber-500" : "text-slate-500"
+                  }`}
+                />
+                {isTestingConnection ? "Testing..." : "Test Connection"}
+              </button>
+
+              <button
+                type="submit"
+                disabled={isSavingSheet}
+                className="inline-flex items-center gap-2 px-4 py-2 rounded-xl bg-amber-500 hover:bg-amber-600 active:bg-amber-700 text-slate-950 font-semibold text-xs transition-colors disabled:opacity-50"
+              >
+                <Save className="w-3.5 h-3.5" />
+                {isSavingSheet ? "Saving..." : "Save Configuration"}
+              </button>
+            </div>
           </div>
         </form>
       </div>

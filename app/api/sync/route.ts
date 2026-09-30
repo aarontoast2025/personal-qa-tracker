@@ -10,6 +10,7 @@ import {
   syncFeedbackTemplates,
 } from "@/lib/google/sync-service";
 import { fetchSheetCsv, fetchSheetValues, rowsToObjects } from "@/lib/google/sheets";
+import { getWebAppConfig, fetchInitDataFromWebApp } from "@/lib/google/web-app-client";
 import fs from "fs";
 import path from "path";
 
@@ -168,6 +169,18 @@ export async function POST(request: Request) {
 
   try {
     const results: Record<string, number> = {};
+    const config = await getWebAppConfig(supabase);
+    const qaEmail = body.qaEmail || user?.email || "";
+
+    // 0. Primary Bridge: Fetch through Google Apps Script Web App (bypasses 401 domain restrictions)
+    let webAppInitData: any = null;
+    if (config.url) {
+      try {
+        webAppInitData = await fetchInitDataFromWebApp(config, qaEmail);
+      } catch (gasErr: any) {
+        console.warn("Google Apps Script Web App fetch warning:", gasErr.message);
+      }
+    }
 
     // Helper to fetch rows either via GViz CSV or Google API with multiple tab name variations
     async function getTabRows(tabNames: string | string[]): Promise<Record<string, string>[]> {
@@ -189,14 +202,23 @@ export async function POST(request: Request) {
       return [];
     }
 
-    // 1. Sync Rubrics first (so foreign keys on assignments and templates resolve cleanly)
-    try {
-      const rubrics = await getTabRows(["Rubrics", "Rubric"]);
-      if (rubrics.length > 0) {
-        results.rubrics = await syncRubrics(supabase, rubrics);
+    // 1. Sync Rubrics first
+    if (webAppInitData?.rubrics && Array.isArray(webAppInitData.rubrics) && webAppInitData.rubrics.length > 0) {
+      try {
+        results.rubrics = await syncRubrics(supabase, webAppInitData.rubrics);
+      } catch (e: any) {
+        console.warn("Web App Rubrics sync warning:", e.message);
       }
-    } catch (e: any) {
-      console.warn("Rubrics tab sync warning:", e.message);
+    }
+    if (!results.rubrics || results.rubrics === 0) {
+      try {
+        const rubrics = await getTabRows(["Rubrics", "Rubric"]);
+        if (rubrics.length > 0) {
+          results.rubrics = await syncRubrics(supabase, rubrics);
+        }
+      } catch (e: any) {
+        console.warn("Rubrics tab sync warning:", e.message);
+      }
     }
 
     // 2. Sync Rubric Descriptions
@@ -215,18 +237,27 @@ export async function POST(request: Request) {
     }
 
     // 3. Sync Feedback Templates
-    try {
-      const feedbackTemplates = await getTabRows([
-        "FeedbackTemplates",
-        "Feedback Templates",
-        "Feedback_Templates",
-        "FeedbackTemplate",
-      ]);
-      if (feedbackTemplates.length > 0) {
-        results.feedbackTemplates = await syncFeedbackTemplates(supabase, feedbackTemplates);
+    if (webAppInitData?.feedbackChips && Array.isArray(webAppInitData.feedbackChips) && webAppInitData.feedbackChips.length > 0) {
+      try {
+        results.feedbackTemplates = await syncFeedbackTemplates(supabase, webAppInitData.feedbackChips);
+      } catch (e: any) {
+        console.warn("Web App FeedbackTemplates sync warning:", e.message);
       }
-    } catch (e: any) {
-      console.warn("FeedbackTemplates tab sync warning:", e.message);
+    }
+    if (!results.feedbackTemplates || results.feedbackTemplates === 0) {
+      try {
+        const feedbackTemplates = await getTabRows([
+          "FeedbackTemplates",
+          "Feedback Templates",
+          "Feedback_Templates",
+          "FeedbackTemplate",
+        ]);
+        if (feedbackTemplates.length > 0) {
+          results.feedbackTemplates = await syncFeedbackTemplates(supabase, feedbackTemplates);
+        }
+      } catch (e: any) {
+        console.warn("FeedbackTemplates tab sync warning:", e.message);
+      }
     }
 
     // Automatic fallback to local CSV files if Google Sheet tabs are empty or missing
@@ -269,13 +300,22 @@ export async function POST(request: Request) {
       }
 
       // 5. Sync Assignments
-      try {
-        const assignments = await getTabRows(["Assignments", "Assignment"]);
-        if (assignments.length > 0) {
-          results.assignments = await syncAssignments(supabase, assignments);
+      if (webAppInitData?.assignments && Array.isArray(webAppInitData.assignments) && webAppInitData.assignments.length > 0) {
+        try {
+          results.assignments = await syncAssignments(supabase, webAppInitData.assignments);
+        } catch (e: any) {
+          console.warn("Web App Assignments sync warning:", e.message);
         }
-      } catch (e: any) {
-        console.warn("Assignments tab sync warning:", e.message);
+      }
+      if (!results.assignments || results.assignments === 0) {
+        try {
+          const assignments = await getTabRows(["Assignments", "Assignment"]);
+          if (assignments.length > 0) {
+            results.assignments = await syncAssignments(supabase, assignments);
+          }
+        } catch (e: any) {
+          console.warn("Assignments tab sync warning:", e.message);
+        }
       }
 
       // 6. Sync Evaluations (so Interaction IDs are all known)
@@ -289,10 +329,21 @@ export async function POST(request: Request) {
       }
     }
 
+    const totalSynced = Object.values(results).reduce((a, b) => a + b, 0);
+    if (totalSynced === 0) {
+      return NextResponse.json(
+        {
+          error:
+            "No records could be fetched from Google Sheets. If your sheet is restricted to Toast users, please test the Google Script Web App connection in Settings.",
+        },
+        { status: 400 }
+      );
+    }
+
     await supabase.from("sync_logs").insert({
       user_id: user?.id || null,
       target_table: action === "sync-templates" ? "feedback_templates" : "google_sheet",
-      rows_synced: Object.values(results).reduce((a, b) => a + b, 0),
+      rows_synced: totalSynced,
       status: "success",
       completed_at: new Date().toISOString(),
     });
