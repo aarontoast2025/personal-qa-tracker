@@ -30,6 +30,45 @@ export async function POST(request: Request) {
       );
     }
 
+    const action = body.action || "full";
+
+    // Handle confirm action: user's browser already submitted to Google Apps Script
+    if (action === "confirm") {
+      const evaluationId = body.evaluationId;
+      const nowIso = new Date().toISOString();
+
+      await supabase
+        .from("assignments")
+        .update({
+          status: "Completed",
+          synced_at: nowIso,
+        })
+        .eq("id", assignmentId);
+
+      if (evaluationId) {
+        await supabase
+          .from("evaluations")
+          .update({
+            sync_status: "synced",
+            synced_at: nowIso,
+          })
+          .eq("id", evaluationId);
+      }
+
+      await supabase.from("sync_logs").insert({
+        user_id: user?.id || null,
+        target_table: "google_sheet_evaluations",
+        rows_synced: 1,
+        status: "success",
+        completed_at: nowIso,
+      });
+
+      return NextResponse.json({
+        success: true,
+        message: `Assignment ${assignmentId} successfully marked Completed in Supabase.`,
+      });
+    }
+
     // 1. Fetch the assignment record
     const { data: assignment, error: asgErr } = await supabase
       .from("assignments")
@@ -115,8 +154,19 @@ export async function POST(request: Request) {
       isPartial: false,
     };
 
-    // 4. Push to Google Apps Script Web App
     const qaEmail = assignment.qa_email || user?.email || "";
+
+    // If browser is requesting the prepared payload for browser-side submission:
+    if (action === "prepare") {
+      return NextResponse.json({
+        success: true,
+        evaluationData,
+        qaEmail,
+        webAppUrl: config.url,
+      });
+    }
+
+    // 4. Push to Google Apps Script Web App
     const result = await submitEvaluationToWebApp(config, qaEmail, evaluationData);
 
     if (!result || result.success === false) {

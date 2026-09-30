@@ -2,13 +2,25 @@
 
 import { useState } from "react";
 import { RefreshCw } from "lucide-react";
+import {
+  fetchInitDataBrowser,
+  DEFAULT_WEB_APP_URL,
+  DEFAULT_API_TOKEN,
+} from "@/lib/google/browser-gas-client";
 
 interface FetchButtonProps {
   onSyncComplete?: () => void;
   className?: string;
+  userEmail?: string;
+  webAppUrl?: string;
 }
 
-export function FetchButton({ onSyncComplete, className = "" }: FetchButtonProps) {
+export function FetchButton({
+  onSyncComplete,
+  className = "",
+  userEmail = "",
+  webAppUrl = DEFAULT_WEB_APP_URL,
+}: FetchButtonProps) {
   const [isSyncing, setIsSyncing] = useState(false);
   const [lastSyncStatus, setLastSyncStatus] = useState<string | null>(null);
 
@@ -18,10 +30,23 @@ export function FetchButton({ onSyncComplete, className = "" }: FetchButtonProps
     setLastSyncStatus(null);
 
     try {
+      // 1. Fetch live data directly from Google Apps Script via browser session (attaches Toast Okta cookies)
+      let initData: any = null;
+      try {
+        initData = await fetchInitDataBrowser(webAppUrl, DEFAULT_API_TOKEN, userEmail);
+      } catch (browserErr: any) {
+        console.warn("Browser JSONP fetch warning, falling back to server:", browserErr.message);
+      }
+
+      // 2. Ingest and persist data in Supabase via API
       const res = await fetch("/api/sync", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ action: "sync-live" }),
+        body: JSON.stringify({
+          action: "sync-live",
+          initData,
+          qaEmail: userEmail,
+        }),
       });
       const data = await res.json();
 

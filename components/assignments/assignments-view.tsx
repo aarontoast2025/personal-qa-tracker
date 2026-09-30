@@ -8,6 +8,11 @@ import { format } from "date-fns";
 import { DateNavigation } from "./date-navigation";
 import { FetchButton } from "./fetch-button";
 import {
+  submitEvaluationBrowser,
+  DEFAULT_WEB_APP_URL,
+  DEFAULT_API_TOKEN,
+} from "@/lib/google/browser-gas-client";
+import {
   Calendar,
   CheckCircle2,
   Clock,
@@ -113,15 +118,39 @@ export function AssignmentsView({ userEmail }: AssignmentsViewProps) {
     setPushingId(asgId);
 
     try {
-      const res = await fetch("/api/assignments/push", {
+      // 1. Prepare evaluation data from Supabase
+      const prepRes = await fetch("/api/assignments/push", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ assignmentId: asgId }),
+        body: JSON.stringify({ action: "prepare", assignmentId: asgId }),
       });
-      const data = await res.json();
+      const prepData = await prepRes.json();
+      if (!prepRes.ok || !prepData.success) {
+        throw new Error(prepData.error || "Failed to prepare evaluation for push.");
+      }
 
-      if (!res.ok || !data.success) {
-        throw new Error(data.error || "Failed to push evaluation to Google Sheet");
+      // 2. Submit to Google Apps Script directly from the browser using active Toast session
+      const targetUrl = prepData.webAppUrl || DEFAULT_WEB_APP_URL;
+      await submitEvaluationBrowser(
+        targetUrl,
+        DEFAULT_API_TOKEN,
+        prepData.qaEmail || userEmail,
+        prepData.evaluationData
+      );
+
+      // 3. Confirm update in Supabase
+      const confirmRes = await fetch("/api/assignments/push", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          action: "confirm",
+          assignmentId: asgId,
+          evaluationId: prepData.evaluationData?.id,
+        }),
+      });
+      const confirmData = await confirmRes.json();
+      if (!confirmRes.ok || !confirmData.success) {
+        throw new Error(confirmData.error || "Submitted to sheet, but Supabase update failed.");
       }
 
       setAssignments((prev) =>
@@ -192,7 +221,7 @@ export function AssignmentsView({ userEmail }: AssignmentsViewProps) {
           </div>
 
           {/* Icon-Only Fetch Button (Requirement: Icon only, no text) */}
-          <FetchButton onSyncComplete={handleSyncSuccess} />
+          <FetchButton userEmail={userEmail} onSyncComplete={handleSyncSuccess} />
         </div>
       </div>
 

@@ -21,7 +21,12 @@ import {
   RefreshCw,
   User,
 } from "lucide-react";
-import { DEFAULT_WEB_APP_URL } from "@/lib/google/web-app-client";
+import {
+  testBrowserConnection,
+  fetchInitDataBrowser,
+  DEFAULT_WEB_APP_URL,
+  DEFAULT_API_TOKEN,
+} from "@/lib/google/browser-gas-client";
 
 interface SettingsFormProps {
   initialSheetId: string;
@@ -100,6 +105,18 @@ export function SettingsForm({
     setTestConnectionResult(null);
 
     try {
+      // 1. First test via browser session (attaches Toast Google/Okta cookies)
+      const browserRes = await testBrowserConnection(webAppUrl, DEFAULT_API_TOKEN);
+      if (browserRes.ok) {
+        setTestConnectionResult({
+          success: true,
+          message: `Connected successfully! Google Apps Script is active and responsive (${browserRes.latencyMs}ms).`,
+          latencyMs: browserRes.latencyMs,
+        });
+        return;
+      }
+
+      // 2. Fallback to server endpoint
       const res = await fetch("/api/settings/test-connection", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -112,7 +129,7 @@ export function SettingsForm({
       if (!res.ok || !data.success) {
         setTestConnectionResult({
           success: false,
-          message: data.error || "Connection test failed.",
+          message: browserRes.error || data.error || "Connection test failed.",
           latencyMs: data.latencyMs,
         });
       } else {
@@ -184,10 +201,23 @@ export function SettingsForm({
     setMessage(null);
 
     try {
+      // 1. Fetch live data directly from Google Apps Script via browser session (attaches Toast Okta cookies)
+      let initData: any = null;
+      try {
+        initData = await fetchInitDataBrowser(webAppUrl, DEFAULT_API_TOKEN, userEmail);
+      } catch (browserErr: any) {
+        console.warn("Browser JSONP sync fetch warning:", browserErr.message);
+      }
+
       const res = await fetch("/api/sync", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ action, sheetId }),
+        body: JSON.stringify({
+          action,
+          sheetId,
+          initData,
+          qaEmail: userEmail,
+        }),
       });
       const data = await res.json();
 
