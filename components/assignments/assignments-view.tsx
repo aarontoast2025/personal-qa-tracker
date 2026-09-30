@@ -15,6 +15,7 @@ import {
 } from "@/lib/google/browser-gas-client";
 import {
   AlertCircle,
+  AlertTriangle,
   Calendar,
   CheckCircle2,
   Clock,
@@ -24,6 +25,7 @@ import {
   Search,
   Trash2,
   UploadCloud,
+  X,
 } from "lucide-react";
 
 interface AssignmentsViewProps {
@@ -74,6 +76,8 @@ export function AssignmentsView({ userEmail, initialWebAppUrl }: AssignmentsView
   const [syncNotice, setSyncNotice] = useState<string | null>(null);
   const [pushingId, setPushingId] = useState<string | null>(null);
   const [deletingId, setDeletingId] = useState<string | null>(null);
+  const [assignmentToDelete, setAssignmentToDelete] = useState<Assignment | null>(null);
+  const [deleteModalError, setDeleteModalError] = useState<string | null>(null);
 
   const [evalMap, setEvalMap] = useState<Record<string, any>>({});
   const [interactionInputs, setInteractionInputs] = useState<Record<string, string>>({});
@@ -155,6 +159,18 @@ export function AssignmentsView({ userEmail, initialWebAppUrl }: AssignmentsView
   useEffect(() => {
     loadAssignments();
   }, [mode, currentDate, userEmail]);
+
+  // Close delete modal on Escape key press
+  useEffect(() => {
+    function handleKeyDown(e: KeyboardEvent) {
+      if (e.key === "Escape" && assignmentToDelete && !deletingId) {
+        setAssignmentToDelete(null);
+        setDeleteModalError(null);
+      }
+    }
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, [assignmentToDelete, deletingId]);
 
   // Handle successful sync from the icon-only fetch button
   function handleSyncSuccess() {
@@ -365,19 +381,19 @@ export function AssignmentsView({ userEmail, initialWebAppUrl }: AssignmentsView
     }
   }
 
-  // Handle deleting an assignment and its evaluations from Supabase
-  async function handleDelete(asg: Assignment) {
+  // Trigger delete modal for an assignment
+  function handleDeleteClick(asg: Assignment) {
+    if (deletingId || pushingId) return;
+    setDeleteModalError(null);
+    setAssignmentToDelete(asg);
+  }
+
+  // Confirm and execute deleting an assignment and its evaluations from Supabase
+  async function confirmDelete(asg: Assignment) {
     if (deletingId || pushingId) return;
 
-    const agentLabel =
-      asg.agent_snapshot?.displayName ||
-      asg.agent_snapshot?.fullName ||
-      asg.agent_email;
-
-    const confirmMsg = `Are you sure you want to delete assignment ${asg.id} (${agentLabel}) from Supabase?\n\nThis will remove the assignment and any drafted evaluation from the database.`;
-    if (!window.confirm(confirmMsg)) return;
-
     setDeletingId(asg.id);
+    setDeleteModalError(null);
     setRowErrors((prev) => ({ ...prev, [asg.id]: null }));
 
     try {
@@ -423,13 +439,16 @@ export function AssignmentsView({ userEmail, initialWebAppUrl }: AssignmentsView
         return next;
       });
       setTotalUserAssignments((prev) => Math.max(0, prev - 1));
+      setAssignmentToDelete(null);
       setSyncNotice(`Assignment ${asg.id} successfully deleted from Supabase.`);
       setTimeout(() => setSyncNotice(null), 4000);
     } catch (err: any) {
       console.error("Delete error:", err);
+      const errMsg = err.message || "Failed to delete assignment.";
+      setDeleteModalError(errMsg);
       setRowErrors((prev) => ({
         ...prev,
-        [asg.id]: err.message || "Failed to delete assignment.",
+        [asg.id]: errMsg,
       }));
     } finally {
       setDeletingId(null);
@@ -746,7 +765,7 @@ export function AssignmentsView({ userEmail, initialWebAppUrl }: AssignmentsView
                           )}
                           <button
                             type="button"
-                            onClick={() => handleDelete(asg)}
+                            onClick={() => handleDeleteClick(asg)}
                             disabled={deletingId === asg.id || pushingId === asg.id}
                             title="Delete assignment and evaluation from Supabase"
                             className="p-1.5 rounded-xl text-slate-400 hover:text-rose-600 hover:bg-rose-50 dark:hover:bg-rose-950/30 transition-colors disabled:opacity-50"
@@ -767,6 +786,148 @@ export function AssignmentsView({ userEmail, initialWebAppUrl }: AssignmentsView
           </div>
         )}
       </div>
+
+      {/* Delete Confirmation Modal */}
+      {assignmentToDelete && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-sm animate-in fade-in duration-200"
+          onClick={() => {
+            if (!deletingId) {
+              setAssignmentToDelete(null);
+              setDeleteModalError(null);
+            }
+          }}
+        >
+          <div
+            className="relative w-full max-w-md bg-white dark:bg-slate-900 rounded-2xl p-6 shadow-2xl border border-slate-200 dark:border-slate-800 animate-in zoom-in-95 duration-200"
+            onClick={(e) => e.stopPropagation()}
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="delete-modal-title"
+          >
+            {/* Close button */}
+            <button
+              type="button"
+              onClick={() => {
+                if (!deletingId) {
+                  setAssignmentToDelete(null);
+                  setDeleteModalError(null);
+                }
+              }}
+              disabled={!!deletingId}
+              className="absolute top-4 right-4 p-1.5 rounded-xl text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors disabled:opacity-50"
+              aria-label="Close modal"
+            >
+              <X className="w-4 h-4" />
+            </button>
+
+            {/* Header with warning badge */}
+            <div className="flex items-start gap-3.5 mb-4">
+              <div className="w-11 h-11 rounded-2xl bg-rose-50 dark:bg-rose-950/50 border border-rose-200 dark:border-rose-900/50 flex items-center justify-center text-rose-600 dark:text-rose-400 shrink-0">
+                <AlertTriangle className="w-5 h-5" />
+              </div>
+              <div className="pr-6">
+                <h3
+                  id="delete-modal-title"
+                  className="text-base font-semibold text-slate-900 dark:text-white"
+                >
+                  Delete Assignment?
+                </h3>
+                <p className="text-xs text-slate-500 dark:text-slate-400 mt-1">
+                  This action permanently removes the assignment and any drafted evaluation records from Supabase.
+                </p>
+              </div>
+            </div>
+
+            {/* Target Assignment Details Card */}
+            <div className="bg-slate-50 dark:bg-slate-800/60 rounded-xl p-3.5 border border-slate-200/80 dark:border-slate-800 text-xs space-y-2 mb-5">
+              <div className="flex items-center justify-between">
+                <span className="text-slate-500 dark:text-slate-400">Agent:</span>
+                <span className="font-semibold text-slate-800 dark:text-slate-200">
+                  {assignmentToDelete.agent_snapshot?.displayName ||
+                    assignmentToDelete.agent_snapshot?.fullName ||
+                    assignmentToDelete.agent_email}
+                </span>
+              </div>
+              <div className="flex items-center justify-between">
+                <span className="text-slate-500 dark:text-slate-400">Assignment ID:</span>
+                <span className="font-mono text-slate-700 dark:text-slate-300">
+                  {assignmentToDelete.id}
+                </span>
+              </div>
+              <div className="flex items-center justify-between">
+                <span className="text-slate-500 dark:text-slate-400">Date:</span>
+                <span className="text-slate-700 dark:text-slate-300">
+                  {formatTableDate(assignmentToDelete.date)}
+                </span>
+              </div>
+              <div className="flex items-center justify-between">
+                <span className="text-slate-500 dark:text-slate-400">Status:</span>
+                <span
+                  className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[11px] font-medium ${
+                    assignmentToDelete.status === "Completed"
+                      ? "bg-emerald-50 dark:bg-emerald-950/40 text-emerald-700 dark:text-emerald-300 border border-emerald-200 dark:border-emerald-800"
+                      : assignmentToDelete.status === "Partial"
+                      ? "bg-blue-50 dark:bg-blue-950/40 text-blue-700 dark:text-blue-300 border border-blue-200 dark:border-blue-800"
+                      : "bg-amber-50 dark:bg-amber-950/40 text-amber-700 dark:text-amber-300 border border-amber-200 dark:border-amber-800"
+                  }`}
+                >
+                  {assignmentToDelete.status}
+                </span>
+              </div>
+              {evalMap[assignmentToDelete.id]?.interaction_id && (
+                <div className="flex items-center justify-between pt-1 border-t border-slate-200 dark:border-slate-700/60">
+                  <span className="text-slate-500 dark:text-slate-400">Interaction ID:</span>
+                  <span className="font-mono font-medium text-slate-800 dark:text-slate-200">
+                    {evalMap[assignmentToDelete.id].interaction_id}
+                  </span>
+                </div>
+              )}
+            </div>
+
+            {/* Error Message inside modal if deletion fails */}
+            {deleteModalError && (
+              <div className="mb-4 p-3 rounded-xl bg-rose-50 dark:bg-rose-950/40 border border-rose-200 dark:border-rose-900 text-rose-700 dark:text-rose-300 text-xs flex items-start gap-2">
+                <AlertCircle className="w-4 h-4 shrink-0 mt-0.5" />
+                <span>{deleteModalError}</span>
+              </div>
+            )}
+
+            {/* Modal Actions */}
+            <div className="flex items-center justify-end gap-2.5">
+              <button
+                type="button"
+                onClick={() => {
+                  setAssignmentToDelete(null);
+                  setDeleteModalError(null);
+                }}
+                disabled={!!deletingId}
+                className="px-4 py-2 rounded-xl text-xs font-semibold border border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors disabled:opacity-50"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={() => confirmDelete(assignmentToDelete)}
+                disabled={!!deletingId}
+                className="inline-flex items-center gap-1.5 px-4 py-2 rounded-xl text-xs font-semibold bg-rose-600 hover:bg-rose-700 active:bg-rose-800 text-white shadow-sm transition-all disabled:opacity-50"
+              >
+                {deletingId ? (
+                  <>
+                    <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                    <span>Deleting...</span>
+                  </>
+                ) : (
+                  <>
+                    <Trash2 className="w-3.5 h-3.5" />
+                    <span>Delete Record</span>
+                  </>
+                )}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
