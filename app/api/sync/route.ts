@@ -320,13 +320,22 @@ export async function POST(request: Request) {
       }
 
       // 6. Sync Evaluations (so Interaction IDs are all known)
-      try {
-        const evaluations = await getTabRows(["Evaluations", "Evaluation"]);
-        if (evaluations.length > 0) {
-          results.evaluations = await syncEvaluations(supabase, evaluations);
+      if (webAppInitData?.evaluations && Array.isArray(webAppInitData.evaluations) && webAppInitData.evaluations.length > 0) {
+        try {
+          results.evaluations = await syncEvaluations(supabase, webAppInitData.evaluations);
+        } catch (e: any) {
+          console.warn("Web App Evaluations sync warning:", e.message);
         }
-      } catch (e: any) {
-        console.warn("Evaluations tab sync warning:", e.message);
+      }
+      if (!results.evaluations || results.evaluations === 0) {
+        try {
+          const evaluations = await getTabRows(["Evaluations", "Evaluation"]);
+          if (evaluations.length > 0) {
+            results.evaluations = await syncEvaluations(supabase, evaluations);
+          }
+        } catch (e: any) {
+          console.warn("Evaluations tab sync warning:", e.message);
+        }
       }
     }
 

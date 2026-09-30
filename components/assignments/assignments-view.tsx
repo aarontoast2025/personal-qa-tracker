@@ -112,9 +112,9 @@ export function AssignmentsView({ userEmail, initialWebAppUrl }: AssignmentsView
             .select("id, assignment_id, interaction_id, score, evaluation_type, rubric_id, evaluation_details, sync_status")
             .in("assignment_id", asgIds);
 
+          const map: Record<string, any> = {};
+          const inputs: Record<string, string> = {};
           if (evals && evals.length > 0) {
-            const map: Record<string, any> = {};
-            const inputs: Record<string, string> = {};
             evals.forEach((ev) => {
               if (ev.assignment_id) {
                 map[ev.assignment_id] = ev;
@@ -123,8 +123,78 @@ export function AssignmentsView({ userEmail, initialWebAppUrl }: AssignmentsView
                 }
               }
             });
-            setEvalMap(map);
-            setInteractionInputs((prev) => ({ ...inputs, ...prev }));
+          }
+          setEvalMap(map);
+          setInteractionInputs((prev) => ({ ...inputs, ...prev }));
+
+          // Auto-resolve missing Interaction IDs for Completed or Partial assignments directly from Google Sheet
+          const missingCompleted = asgList.filter(
+            (a) => (a.status === "Completed" || a.status === "Partial") && !map[a.id]?.interaction_id
+          );
+
+          if (missingCompleted.length > 0) {
+            const targetUrl = (webAppUrl || DEFAULT_WEB_APP_URL).trim();
+            if (targetUrl) {
+              missingCompleted.forEach(async (asg) => {
+                try {
+                  const res = await browserJsonpRequest<{ success: boolean; exists?: boolean; data?: any }>(
+                    targetUrl,
+                    {
+                      action: "check_existing",
+                      token: DEFAULT_API_TOKEN,
+                      assignment_id: asg.id,
+                    },
+                    15000
+                  );
+                  if (res && res.exists && res.data?.interactionId) {
+                    const ev = res.data;
+                    const iId = String(ev.interactionId).trim();
+                    setEvalMap((prev) => ({
+                      ...prev,
+                      [asg.id]: {
+                        id: ev.id || `EVL-${asg.id}`,
+                        assignment_id: asg.id,
+                        interaction_id: iId,
+                        score: parseFloat(ev.score) || 0,
+                        evaluation_type: ev.evaluationType || asg.evaluation_type,
+                        rubric_id: ev.rubricId || asg.rubric_id,
+                        evaluation_details: ev.details || ev.evaluationDetails || {},
+                        sync_status: "synced",
+                      },
+                    }));
+                    setInteractionInputs((prev) => ({
+                      ...prev,
+                      [asg.id]: iId,
+                    }));
+
+                    // Persist to Supabase evaluations so future reloads are instant
+                    const snap = ev.agentSnapshot || asg.agent_snapshot || {};
+                    const agentName = snap?.displayName || snap?.fullName || asg.agent_email;
+                    await supabase.from("evaluations").upsert(
+                      {
+                        id: ev.id || `EVL-${asg.id}`,
+                        assignment_id: asg.id,
+                        interaction_id: iId,
+                        score: parseFloat(ev.score) || 0,
+                        submitted_at: ev.submittedAt || new Date().toISOString(),
+                        agent_name: agentName,
+                        agent_snapshot: snap,
+                        rubric_id: ev.rubricId || asg.rubric_id,
+                        evaluation_type: ev.evaluationType || asg.evaluation_type,
+                        evaluation_details: ev.details || ev.evaluationDetails || {},
+                        qa_name: ev.qaName || userEmail.split("@")[0] || "QA Specialist",
+                        qa_email: asg.qa_email,
+                        sync_status: "synced",
+                        synced_at: new Date().toISOString(),
+                      },
+                      { onConflict: "interaction_id" }
+                    );
+                  }
+                } catch (gasErr) {
+                  console.warn(`Could not resolve interaction ID for ${asg.id}:`, gasErr);
+                }
+              });
+            }
           }
         }
       }
@@ -653,7 +723,7 @@ export function AssignmentsView({ userEmail, initialWebAppUrl }: AssignmentsView
                           <div className="relative flex items-center">
                             <input
                               type="text"
-                              value={interactionInputs[asg.id] ?? evalMap[asg.id]?.interaction_id ?? ""}
+                              value={interactionInputs[asg.id] !== undefined ? interactionInputs[asg.id] : (evalMap[asg.id]?.interaction_id ?? "")}
                               onChange={(e) => {
                                 const val = e.target.value;
                                 setInteractionInputs((prev) => ({ ...prev, [asg.id]: val }));

@@ -108,11 +108,52 @@ export async function syncAssignments(
 
   const { error } = await supabase
     .from("assignments")
-    .upsert(records, { onConflict: "id", ignoreDuplicates: true });
+    .upsert(records, { onConflict: "id", ignoreDuplicates: false });
 
   if (error) {
     console.error("Error syncing assignments:", error);
     throw error;
+  }
+
+  // Auto-persist evaluations for any assignment carrying an Interaction ID (from Google Sheet sync)
+  const derivedEvals = rows
+    .filter((r) => {
+      const iId = String(r.interactionId || r.interaction_id || r["Interaction ID"] || "").trim();
+      const asgId = String(r.ID || r.id || "").trim();
+      return iId && asgId;
+    })
+    .map((r) => {
+      const asgId = String(r.ID || r.id).trim();
+      const iId = String(r.interactionId || r.interaction_id || r["Interaction ID"]).trim();
+      const snap = safeJsonParse(r["Agent Snapshot"] || r.agentSnapshot || r.agent_snapshot, {});
+      const qaMail = String(r["QA Email"] || r.qaEmail || r.qa_email || "").trim().toLowerCase();
+      const rawDetails = r["Evaluation Details"] || r.evaluationDetails || r.details;
+      return {
+        id: String(r.evalId || r.evaluationId || `EVL-${asgId}`).trim(),
+        assignment_id: asgId,
+        interaction_id: iId,
+        score: parseFloat(r.Score ?? r.score) || 0,
+        submitted_at: r["Submitted At"] || r.submittedAt || r.submitted_at || new Date().toISOString(),
+        agent_name: snap?.displayName || snap?.fullName || r.agentName || r.agent_name || r.agent_email || "Unknown",
+        agent_snapshot: snap,
+        rubric_id: r["Rubric ID"] || r.rubricId || r.rubric_id || null,
+        evaluation_type: r["Evaluation Type"] || r.evaluationType || r.evaluation_type || "Manual Audit",
+        evaluation_details: safeJsonParse(rawDetails, typeof rawDetails === "object" && rawDetails !== null ? rawDetails : {}),
+        qa_email: qaMail || null,
+        qa_name: r["QA Name"] || r.qaName || r.qa_name || (qaMail ? qaMail.split("@")[0] : "QA Specialist"),
+        sync_status: "synced",
+        synced_at: new Date().toISOString(),
+      };
+    });
+
+  if (derivedEvals.length > 0) {
+    const { error: evalUpsertErr } = await supabase.from("evaluations").upsert(derivedEvals, {
+      onConflict: "interaction_id",
+      ignoreDuplicates: false,
+    });
+    if (evalUpsertErr) {
+      console.warn("syncAssignments derived evaluations upsert warning:", evalUpsertErr.message);
+    }
   }
 
   return records.length;
@@ -129,54 +170,61 @@ export async function syncEvaluations(
   const knownAsgIds = new Set((knownAsgs || []).map((a) => a.id));
 
   const records = rows
-    .filter((r) => r.ID && r["Interaction ID"])
+    .filter((r) => (r.ID || r.id) && (r["Interaction ID"] || r.interactionId || r.interaction_id))
     .map((r) => {
-      const rawAsgId = r["Assignment ID"] ? String(r["Assignment ID"]).trim() : null;
+      const rawAsgId = r["Assignment ID"] || r.assignmentId || r.assignment_id
+        ? String(r["Assignment ID"] || r.assignmentId || r.assignment_id).trim()
+        : null;
       const validAsgId = rawAsgId && knownAsgIds.has(rawAsgId) ? rawAsgId : null;
+      const agentSnap = safeJsonParse(r["Agent Snapshot"] || r.agentSnapshot || r.agent_snapshot, {});
+      const rawDetails = r["Evaluation Details"] || r.evaluationDetails || r.details;
+      const evalDetails = safeJsonParse(rawDetails, typeof rawDetails === "object" && rawDetails !== null ? rawDetails : {});
 
       return {
-        id: String(r.ID).trim(),
-        submitted_at: r["Submitted At"] || new Date().toISOString(),
-        agent_name: r["Agent Name"] || "Unknown",
-        agent_snapshot: safeJsonParse(r["Agent Snapshot"]),
-        score: parseFloat(r.Score) || 0,
-        shift_snapshot: r["Shift Snapshot"] || null,
-        rubric_id: r["Rubric ID"] || null,
-        evaluation_details: safeJsonParse(r["Evaluation Details"]),
+        id: String(r.ID || r.id).trim(),
+        submitted_at: r["Submitted At"] || r.submittedAt || r.submitted_at || new Date().toISOString(),
+        agent_name: r["Agent Name"] || r.agentName || r.agent_name || agentSnap?.displayName || agentSnap?.fullName || "Unknown",
+        agent_snapshot: agentSnap,
+        score: parseFloat(r.Score ?? r.score) || 0,
+        shift_snapshot: r["Shift Snapshot"] || r.shiftSnapshot || r.shift_snapshot || null,
+        rubric_id: r["Rubric ID"] || r.rubricId || r.rubric_id || null,
+        evaluation_details: evalDetails,
         assignment_id: validAsgId,
-        interaction_id: String(r["Interaction ID"]).trim(),
-        date_of_interaction: r["Date of Interaction"]
-          ? normalizeDate(r["Date of Interaction"])
+        interaction_id: String(r["Interaction ID"] || r.interactionId || r.interaction_id).trim(),
+        date_of_interaction: (r["Date of Interaction"] || r.dateOfInteraction || r.date_of_interaction)
+          ? normalizeDate(r["Date of Interaction"] || r.dateOfInteraction || r.date_of_interaction)
           : null,
-      call_ani_dnis: r["Call ANI/DNIS"] || null,
-      case_no: r["Case No."] || null,
-      call_duration: r["Call Duration"] || null,
-      case_category: r["Case Category"] || null,
-      case_sub_category: r["Case Sub-Category"] || null,
-      issue_concern: r["Issue/Concern"] || null,
-      qa_name: r["QA Name"] || "Unknown",
-      qa_email: r["QA Email"] || null,
-      dispute_status: r["Dispute Status"] || "None",
-      dispute_data: r["Dispute Data"] ? safeJsonParse(r["Dispute Data"]) : null,
-      evaluation_type: r["Evaluation Type"] || "Manual Audit",
-      consultation_status: r["Consultation Status"] || "None",
-      consultation_data: r["Consultation Data"]
-        ? safeJsonParse(r["Consultation Data"])
-        : null,
-      comments: r.Comments || null,
-      ticket_link: r["Ticket Link"] || null,
-      supervisor_ack_status: r["Supervisor Ack Status"] || "None",
-      supervisor_ack_data: r["Supervisor Ack Data"]
-        ? safeJsonParse(r["Supervisor Ack Data"])
-        : null,
-      sync_status: "synced",
-      synced_at: new Date().toISOString(),
-    };
-  });
+        call_ani_dnis: r["Call ANI/DNIS"] || r.callAniDnis || r.call_ani_dnis || null,
+        case_no: r["Case No."] || r.caseNo || r.case_no || null,
+        call_duration: r["Call Duration"] || r.callDuration || r.call_duration || null,
+        case_category: r["Case Category"] || r.caseCategory || r.case_category || null,
+        case_sub_category: r["Case Sub-Category"] || r.caseSubCategory || r.case_sub_category || null,
+        issue_concern: r["Issue/Concern"] || r.issueConcern || r.issue_concern || null,
+        qa_name: r["QA Name"] || r.qaName || r.qa_name || "Unknown",
+        qa_email: r["QA Email"] || r.qaEmail || r.qa_email || null,
+        dispute_status: r["Dispute Status"] || r.disputeStatus || r.dispute_status || "None",
+        dispute_data: (r["Dispute Data"] || r.disputeData) ? safeJsonParse(r["Dispute Data"] || r.disputeData) : null,
+        evaluation_type: r["Evaluation Type"] || r.evaluationType || r.evaluation_type || "Manual Audit",
+        consultation_status: r["Consultation Status"] || r.consultationStatus || r.consultation_status || "None",
+        consultation_data: (r["Consultation Data"] || r.consultationData)
+          ? safeJsonParse(r["Consultation Data"] || r.consultationData)
+          : null,
+        comments: r.Comments || r.comments || null,
+        ticket_link: r["Ticket Link"] || r.ticketLink || r.ticket_link || null,
+        supervisor_ack_status: r["Supervisor Ack Status"] || r.supervisorAckStatus || r.supervisor_ack_status || "None",
+        supervisor_ack_data: (r["Supervisor Ack Data"] || r.supervisorAckData)
+          ? safeJsonParse(r["Supervisor Ack Data"] || r.supervisorAckData)
+          : null,
+        sync_status: "synced",
+        synced_at: new Date().toISOString(),
+      };
+    });
+
+  if (records.length === 0) return 0;
 
   const { error } = await supabase
     .from("evaluations")
-    .upsert(records, { onConflict: "interaction_id", ignoreDuplicates: true });
+    .upsert(records, { onConflict: "interaction_id", ignoreDuplicates: false });
 
   if (error) {
     console.error("Error syncing evaluations:", error);
