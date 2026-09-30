@@ -60,6 +60,8 @@
     var DEFAULT_SUPABASE_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InB4dGpscXJieXFtc3d5Y2ZqbXNkIiwicm9sZSI6ImFub24iLCJpYXQiOjE3OTA2ODU3NzIsImV4cCI6MjEwNjI2MTc3Mn0.OLWPtA5hRs3zED5QsXSkRrXnA_wC4lBpxGCVrBCR8fg';
     var SUPABASE_URL = DEFAULT_SUPABASE_URL;
     var SUPABASE_KEY = DEFAULT_SUPABASE_KEY;
+    var DEFAULT_GAS_URL = 'https://script.google.com/a/macros/toasttab.com/s/AKfycbzRI2l-Q9Xxz6zrFQpPAj3c4OjFk3SQmUjsAQTtglOdFg7rakCajtw7SO6hgXueq54lqA/exec';
+    var GAS_URL = storage.get('gas_url', DEFAULT_GAS_URL);
 
     var DEFAULT_FALLBACK_RUBRIC = {
         id: 'toast-standard-qa',
@@ -2600,8 +2602,8 @@
     });
 
     // --- Save to Personal Supabase Cloud or Google Sheets API ---
-    var saveRecord = function(targetStatus) {
-        targetStatus = targetStatus || 'Completed';
+    var saveRecord = function(targetStatus, pushToSheet) {
+        targetStatus = targetStatus || 'Partial';
         if (!selectedAssignmentId && (!selAgent || !selAgent.value)) {
             showToast("Please select an Agent first!", true);
             return Promise.reject(new Error("No agent selected"));
@@ -2612,6 +2614,42 @@
             showSettingsModal();
             return Promise.reject(new Error("Database not configured"));
         }
+
+        // Helper to push a partial evaluation claim to Google Apps Script Web App
+        var pushPartialToSheet = function() {
+            var gasTargetUrl = GAS_URL || DEFAULT_GAS_URL;
+            if (!gasTargetUrl) return Promise.resolve();
+
+            var gasPayload = {
+                action: 'submit_evaluation',
+                token: API_TOKEN || DEFAULT_API_TOKEN,
+                qaEmail: QA_EMAIL,
+                format: 'iframe',
+                evaluationData: {
+                    assignmentId: selectedAssignmentId || '',
+                    interactionId: inpInteractionId.value.trim(),
+                    agentName: resolvedAgentName,
+                    agentEmail: selectedAgentEmail,
+                    agentSnapshot: agentSnap,
+                    evaluationType: (selEvalType && selEvalType.value) ? selEvalType.value : ((selectedAsg && (selectedAsg.evaluationType || selectedAsg.evaluation_type)) || 'Manual Audit'),
+                    callAniDnis: selAni.value ? selAni.value.trim() : "",
+                    caseNo: inpCaseNo.value.trim(),
+                    callDuration: inpDuration.value.trim(),
+                    dateOfInteraction: inpDateInteraction.value,
+                    evaluationDate: inpDateEvaluation.value,
+                    caseCategory: inpCategory.value.trim(),
+                    caseSubCategory: inpSubCategory.value.trim(),
+                    issueConcern: txtIssue.value.trim(),
+                    rubricId: (currentRubric && currentRubric.id) || '',
+                    score: 0,
+                    status: 'Partial',
+                    isPartial: true
+                }
+            };
+            return formPostRequest(gasTargetUrl, gasPayload).catch(function(e){
+                console.warn("Push partial claim to sheet warning:", e);
+            });
+        };
 
         // Build Section-based Evaluation Details:
         // Format: { "Section Name": [ { question, selected, points, feedback, feedbackText, feedbackChips } ] }
@@ -2729,6 +2767,12 @@
                         if (asg) asg.status = 'Partial';
                         updateAgentDropdown();
                     }
+                    if (pushToSheet) {
+                        return pushPartialToSheet().then(function(){
+                            showToast("Partial evaluation claimed & synced to Google Sheet!", false);
+                            return true;
+                        });
+                    }
                     showToast("Evaluation saved as Partial in Personal QA Tracker!", false);
                     return true;
                 })
@@ -2812,6 +2856,12 @@
                         var asg = globalAssignments.find(function(a){ return a.id === selectedAssignmentId; });
                         if (asg) asg.status = 'Partial';
                         updateAgentDropdown();
+                    }
+                    if (pushToSheet) {
+                        return pushPartialToSheet().then(function(){
+                            showToast("Partial evaluation claimed & synced to Google Sheet!", false);
+                            return true;
+                        });
                     }
                     showToast("Evaluation saved as Partial in Supabase!", false);
                     return true;
@@ -3167,7 +3217,7 @@
                             qaEmail: ev.qa_email,
                             qaName: ev.qa_name
                         };
-                        populateEvaluationRecord(mapped);
+                        populateEvaluationRecord(mapped, result.assignment);
                     } else {
                         duplicateWarningBox.style.display = "none";
                         duplicateWarningBox.innerHTML = "";
@@ -3225,21 +3275,37 @@
     });
 
     // --- DOM Interaction & Generation ---
-    var handleGeneration = function(saveToDb) {
+    var btnCancel, btnSave, btnPartial, btnGenerate;
+
+    var handleGeneration = function() {
         if (!selectedAssignmentId && (!selAgent || !selAgent.value)) {
             showToast("Please select an Agent first!", true);
             return;
         }
 
-        var activeBtn = saveToDb ? btnGenerate : btnGenerateOnly;
-        var originalText = activeBtn.textContent;
+        var activeBtn = btnGenerate || {};
+        var originalText = activeBtn.textContent || "Generate";
         activeBtn.textContent = "Generating... ⏳";
 
-        [btnGenerate, btnGenerateOnly, btnSaveOnly, btnCancel, btnGenToggle].forEach(function(b){
-            b.disabled = true;
-            b.style.opacity = "0.7";
-            b.style.cursor = "not-allowed";
+        var allButtons = [btnGenerate, btnSave, btnPartial, btnCancel];
+        allButtons.forEach(function(b){
+            if (b) {
+                b.disabled = true;
+                b.style.opacity = "0.7";
+                b.style.cursor = "not-allowed";
+            }
         });
+
+        var restoreButtons = function() {
+            activeBtn.textContent = originalText;
+            allButtons.forEach(function(b){
+                if (b) {
+                    b.disabled = false;
+                    b.style.opacity = "1";
+                    b.style.cursor = "pointer";
+                }
+            });
+        };
 
         var allKeys = Object.keys(state);
         var checkedKeys = allKeys.filter(function(k){ return state[k].checked; });
@@ -3248,35 +3314,8 @@
         var index = 0;
         var processNext = function() {
             if(index >= targetKeys.length) {
-                if(saveToDb) {
-                    saveRecord('Partial').then(function(){
-                        activeBtn.textContent = originalText;
-                        [btnGenerate, btnGenerateOnly, btnSaveOnly, btnCancel, btnGenToggle].forEach(function(b){
-                            b.disabled = false;
-                            b.style.opacity = "1";
-                            b.style.cursor = "pointer";
-                        });
-                        showToast("Generated and Saved as Partial in Personal QA Tracker!", false);
-                        setTimeout(function(){ overlay.remove(); }, 1500);
-                    }).catch(function(e){
-                        showToast("Generated, but submission failed: " + e.message, true);
-                        activeBtn.textContent = originalText;
-                        [btnGenerate, btnGenerateOnly, btnSaveOnly, btnCancel, btnGenToggle].forEach(function(b){
-                            b.disabled = false;
-                            b.style.opacity = "1";
-                            b.style.cursor = "pointer";
-                        });
-                    });
-                } else {
-                    activeBtn.textContent = originalText;
-                    [btnGenerate, btnGenerateOnly, btnSaveOnly, btnCancel, btnGenToggle].forEach(function(b){
-                        b.disabled = false;
-                        b.style.opacity = "1";
-                        b.style.cursor = "pointer";
-                    });
-                    showToast("Generated successfully in Stella Connect!", false);
-                    genMenu.style.display = "none";
-                }
+                restoreButtons();
+                showToast("Generated successfully in Stella Connect!", false);
                 return;
             }
 
@@ -3345,66 +3384,56 @@
     scoreBadge.innerHTML = "<span>Score: <strong>--</strong></span>";
     footer.appendChild(scoreBadge);
 
-    var btnCancel = createElement("button", sBtnCancel);
+    btnCancel = createElement("button", sBtnCancel);
     btnCancel.textContent = "Cancel";
     addListener(btnCancel, "click", function(){ overlay.remove(); });
 
-    var btnSaveOnly = createElement("button", sBtnGenerate);
-    btnSaveOnly.textContent = "Save Evaluation";
-    btnSaveOnly.style.backgroundColor = "#059669";
-    addListener(btnSaveOnly, "click", function(){
-        btnSaveOnly.disabled = true;
-        btnSaveOnly.textContent = "Saving...";
-        saveRecord('Partial').then(function(){
-            showToast("Evaluation saved as Partial in Personal QA Tracker! Ready to review and push.", false);
+    btnSave = createElement("button", sBtnGenerate);
+    btnSave.textContent = "Save";
+    btnSave.style.backgroundColor = "#059669";
+    btnSave.title = "Save evaluation to Personal QA Tracker (status: Partial)";
+    addListener(btnSave, "click", function(){
+        btnSave.disabled = true;
+        btnSave.textContent = "Saving...";
+        saveRecord('Partial', false).then(function(){
+            showToast("Evaluation saved as Partial in Personal QA Tracker!", false);
         }).catch(function(e){
             showToast(e.message, true);
         }).finally(function(){
-            btnSaveOnly.disabled = false;
-            btnSaveOnly.textContent = "Save Evaluation";
+            btnSave.disabled = false;
+            btnSave.textContent = "Save";
         });
     });
 
-    var genDropdownContainer = createElement("div", "position:relative;display:flex;align-items:stretch");
-    var btnGenerate = createElement("button", sBtnGenerate);
-    btnGenerate.textContent = "Generate & Save";
-    btnGenerate.style.borderRadius = "5px 0 0 5px";
-    btnGenerate.style.margin = "0";
-
-    var btnGenToggle = createElement("button", sBtnGenerate);
-    btnGenToggle.innerHTML = "&#9662;";
-    btnGenToggle.style.padding = "8px 10px";
-    btnGenToggle.style.borderRadius = "0 5px 5px 0";
-    btnGenToggle.style.borderLeft = "1px solid rgba(255,255,255,0.2)";
-    btnGenToggle.style.margin = "0";
-
-    var genMenu = createElement("div");
-    genMenu.style.cssText = "position:absolute;bottom:100%;right:0;background:white;border:1px solid #cbd5e1;border-radius:6px;box-shadow:0 -4px 14px rgba(0,0,0,0.12);display:none;flex-direction:column;min-width:160px;z-index:100001;margin-bottom:6px;overflow:hidden";
-
-    var btnGenerateOnly = createElement("button");
-    btnGenerateOnly.textContent = "Generate";
-    btnGenerateOnly.style.cssText = "width:100%;text-align:left;padding:10px 14px;border:none;background:white;cursor:pointer;font-size:13px;color:#334155;transition:background 0.15s;font-family:inherit;font-weight:500";
-    addListener(btnGenerateOnly, "mouseenter", function(){ btnGenerateOnly.style.background = "#f8fafc"; });
-    addListener(btnGenerateOnly, "mouseleave", function(){ btnGenerateOnly.style.background = "white"; });
-
-    genMenu.appendChild(btnGenerateOnly);
-    genDropdownContainer.appendChild(btnGenerate);
-    genDropdownContainer.appendChild(btnGenToggle);
-    genDropdownContainer.appendChild(genMenu);
-
-    addListener(btnGenToggle, "click", function(e){
-        e.stopPropagation();
-        var isVisible = genMenu.style.display === "flex";
-        genMenu.style.display = isVisible ? "none" : "flex";
+    btnPartial = createElement("button", sBtnGenerate);
+    btnPartial.textContent = "Partial";
+    btnPartial.style.backgroundColor = "#d97706";
+    btnPartial.title = "Save evaluation and claim partial record in Google Sheet";
+    addListener(btnPartial, "click", function(){
+        btnPartial.disabled = true;
+        btnPartial.textContent = "Claiming...";
+        saveRecord('Partial', true).then(function(){
+            showToast("Partial evaluation claimed & synced to Google Sheet!", false);
+        }).catch(function(e){
+            showToast(e.message, true);
+        }).finally(function(){
+            btnPartial.disabled = false;
+            btnPartial.textContent = "Partial";
+        });
     });
-    addListener(document, "click", function(){ genMenu.style.display = "none"; });
 
-    addListener(btnGenerate, "click", function(){ handleGeneration(true); });
-    addListener(btnGenerateOnly, "click", function(){ handleGeneration(false); });
+    btnGenerate = createElement("button", sBtnGenerate);
+    btnGenerate.textContent = "Generate";
+    btnGenerate.style.backgroundColor = "#2563eb";
+    btnGenerate.title = "Synchronize selected ratings and feedback to Stella Connect form";
+    addListener(btnGenerate, "click", function(){
+        handleGeneration();
+    });
 
     footer.appendChild(btnCancel);
-    footer.appendChild(btnSaveOnly);
-    footer.appendChild(genDropdownContainer);
+    footer.appendChild(btnSave);
+    footer.appendChild(btnPartial);
+    footer.appendChild(btnGenerate);
 
     modal.appendChild(header);
     modal.appendChild(contentContainer);
@@ -3993,6 +4022,10 @@
                         if (data.geminiModel && !storage.get('gemini_model', '')) {
                             GEMINI_MODEL = data.geminiModel;
                             storage.set('gemini_model', data.geminiModel);
+                        }
+                        if (data.webAppUrl) {
+                            GAS_URL = data.webAppUrl;
+                            storage.set('gas_url', data.webAppUrl);
                         }
                         if (Array.isArray(data.evalTypes) && data.evalTypes.length > 0) {
                             globalEvalTypes = data.evalTypes;

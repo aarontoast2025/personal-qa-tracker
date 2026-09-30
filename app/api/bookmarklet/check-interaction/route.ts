@@ -43,10 +43,21 @@ export async function GET(request: Request) {
     }
 
     if (existing) {
+      let assignment = null;
+      if (existing.assignment_id) {
+        const { data: asg } = await supabase
+          .from("assignments")
+          .select("*")
+          .eq("id", existing.assignment_id)
+          .maybeSingle();
+        assignment = asg;
+      }
+
       return NextResponse.json(
         {
           exists: true,
           evaluation: existing,
+          assignment,
         },
         { headers: corsHeaders }
       );

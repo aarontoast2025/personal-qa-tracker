@@ -29,7 +29,7 @@ export async function GET(request: Request) {
       { data: descriptions, error: descErr },
       { data: templates, error: tmplErr },
     ] = await Promise.all([
-      supabase.from("app_settings").select("gemini_api_key, gemini_model").limit(1).maybeSingle(),
+      supabase.from("app_settings").select("gemini_api_key, gemini_model, google_web_app_url").limit(1).maybeSingle(),
       supabase
         .from("assignments")
         .select("*")
@@ -96,6 +96,7 @@ export async function GET(request: Request) {
         qa_email: qaEmail,
         geminiApiKey: settings?.gemini_api_key || "",
         geminiModel: settings?.gemini_model || "gemini-2.5-flash",
+        webAppUrl: settings?.google_web_app_url || "",
         assignments: formattedAssignments,
         rubrics: rubrics || [],
         rubricDescriptions: descriptions || [],

@@ -9,10 +9,12 @@ import { DateNavigation } from "./date-navigation";
 import { FetchButton } from "./fetch-button";
 import {
   submitEvaluationBrowser,
+  browserJsonpRequest,
   DEFAULT_WEB_APP_URL,
   DEFAULT_API_TOKEN,
 } from "@/lib/google/browser-gas-client";
 import {
+  AlertCircle,
   Calendar,
   CheckCircle2,
   Clock,
@@ -71,6 +73,11 @@ export function AssignmentsView({ userEmail, initialWebAppUrl }: AssignmentsView
   const [syncNotice, setSyncNotice] = useState<string | null>(null);
   const [pushingId, setPushingId] = useState<string | null>(null);
 
+  const [evalMap, setEvalMap] = useState<Record<string, any>>({});
+  const [interactionInputs, setInteractionInputs] = useState<Record<string, string>>({});
+  const [checkingId, setCheckingId] = useState<string | null>(null);
+  const [rowErrors, setRowErrors] = useState<Record<string, string | null>>({});
+
   const { startStr, endStr } = getDateRange(currentDate, mode);
 
   async function loadAssignments() {
@@ -88,7 +95,32 @@ export function AssignmentsView({ userEmail, initialWebAppUrl }: AssignmentsView
       if (error) {
         console.error("Error loading assignments:", error);
       } else {
-        setAssignments((data as Assignment[]) || []);
+        const asgList = (data as Assignment[]) || [];
+        setAssignments(asgList);
+
+        // Fetch corresponding evaluations to load Interaction IDs and drafted details
+        if (asgList.length > 0) {
+          const asgIds = asgList.map((a) => a.id);
+          const { data: evals } = await supabase
+            .from("evaluations")
+            .select("id, assignment_id, interaction_id, score, evaluation_type, rubric_id, evaluation_details, sync_status")
+            .in("assignment_id", asgIds);
+
+          if (evals && evals.length > 0) {
+            const map: Record<string, any> = {};
+            const inputs: Record<string, string> = {};
+            evals.forEach((ev) => {
+              if (ev.assignment_id) {
+                map[ev.assignment_id] = ev;
+                if (ev.interaction_id) {
+                  inputs[ev.assignment_id] = ev.interaction_id;
+                }
+              }
+            });
+            setEvalMap(map);
+            setInteractionInputs((prev) => ({ ...inputs, ...prev }));
+          }
+        }
       }
 
       // 2. Fetch total assignments count for this user across all dates
@@ -127,6 +159,147 @@ export function AssignmentsView({ userEmail, initialWebAppUrl }: AssignmentsView
     setSyncNotice("Google Sheet data successfully fetched and stored in Supabase!");
     setTimeout(() => setSyncNotice(null), 5000);
     loadAssignments();
+  }
+
+  // Handle submitting/claiming an Interaction ID for an assignment
+  async function handleInteractionSubmit(asg: Assignment, value: string) {
+    const trimmed = value.trim();
+    if (!trimmed) return;
+
+    // If unchanged and already saved, ignore
+    if (evalMap[asg.id]?.interaction_id === trimmed) return;
+
+    setCheckingId(asg.id);
+    setRowErrors((prev) => ({ ...prev, [asg.id]: null }));
+
+    try {
+      // 1. Dual-check: Check Supabase evaluations for uniqueness
+      const { data: existingSupabase } = await supabase
+        .from("evaluations")
+        .select("id, interaction_id, assignment_id, qa_email")
+        .eq("interaction_id", trimmed)
+        .maybeSingle();
+
+      if (existingSupabase && existingSupabase.assignment_id !== asg.id) {
+        setRowErrors((prev) => ({
+          ...prev,
+          [asg.id]: `Interaction ID "${trimmed}" has already been evaluated or claimed!`,
+        }));
+        return;
+      }
+
+      // 2. Background check Google Apps Script Web App (action: 'check_existing')
+      const targetUrl = webAppUrl || DEFAULT_WEB_APP_URL;
+      if (targetUrl) {
+        try {
+          const liveCheck = await browserJsonpRequest<{ success: boolean; exists?: boolean; data?: any }>(
+            targetUrl,
+            {
+              action: "check_existing",
+              token: DEFAULT_API_TOKEN,
+              interaction_id: trimmed,
+            },
+            15000
+          );
+          if (liveCheck && liveCheck.exists) {
+            const existingAsg = liveCheck.data?.assignmentId || liveCheck.data?.["Assignment ID"];
+            if (existingAsg && existingAsg !== asg.id) {
+              setRowErrors((prev) => ({
+                ...prev,
+                [asg.id]: `Interaction ID "${trimmed}" already claimed in Google Sheet!`,
+              }));
+              return;
+            }
+          }
+        } catch (gasErr) {
+          console.warn("Live sheet duplicate check warning:", gasErr);
+        }
+      }
+
+      // 3. Unique! Upsert Partial evaluation in Supabase
+      const nowIso = new Date().toISOString();
+      const evalId = evalMap[asg.id]?.id || `EVL-${Date.now()}-${Math.floor(Math.random() * 1000)}`;
+      const agentName =
+        asg.agent_snapshot?.displayName ||
+        asg.agent_snapshot?.fullName ||
+        asg.agent_email;
+
+      const evalRecord = {
+        id: evalId,
+        submitted_at: nowIso,
+        interaction_id: trimmed,
+        assignment_id: asg.id,
+        agent_name: agentName,
+        agent_snapshot: asg.agent_snapshot || null,
+        qa_email: userEmail,
+        qa_name: userEmail,
+        score: 0,
+        evaluation_type: asg.evaluation_type || "Manual Audit",
+        rubric_id: asg.rubric_id || null,
+        evaluation_details: evalMap[asg.id]?.evaluation_details || {},
+        sync_status: "pending_sheet_sync",
+        synced_at: nowIso,
+      };
+
+      const { error: evalErr } = await supabase
+        .from("evaluations")
+        .upsert(evalRecord, { onConflict: "interaction_id" });
+
+      if (evalErr) {
+        throw new Error(`Failed to save evaluation: ${evalErr.message}`);
+      }
+
+      // 4. Update assignment status to Partial in Supabase
+      const { error: asgErr } = await supabase
+        .from("assignments")
+        .update({ status: "Partial", synced_at: nowIso })
+        .eq("id", asg.id);
+
+      if (asgErr) {
+        console.warn("Failed to update assignment status:", asgErr.message);
+      }
+
+      // 5. Push Partial claim immediately to Google Sheet (so teammates see it claimed with updated timestamp)
+      if (targetUrl) {
+        try {
+          await submitEvaluationBrowser(
+            targetUrl,
+            DEFAULT_API_TOKEN,
+            userEmail,
+            {
+              assignmentId: asg.id,
+              interactionId: trimmed,
+              agentName: agentName,
+              agentEmail: asg.agent_email,
+              agentSnapshot: asg.agent_snapshot,
+              evaluationType: asg.evaluation_type || "Manual Audit",
+              rubricId: asg.rubric_id,
+              score: 0,
+              status: "Partial",
+              isPartial: true,
+            }
+          );
+        } catch (pushErr: any) {
+          console.warn("Could not push partial claim to sheet:", pushErr.message);
+        }
+      }
+
+      // 6. Update local state
+      setEvalMap((prev) => ({ ...prev, [asg.id]: evalRecord }));
+      setAssignments((prev) =>
+        prev.map((a) => (a.id === asg.id ? { ...a, status: "Partial" } : a))
+      );
+      setSyncNotice(`Interaction ID "${trimmed}" claimed and saved as Partial!`);
+      setTimeout(() => setSyncNotice(null), 4000);
+    } catch (err: any) {
+      console.error("Interaction submit error:", err);
+      setRowErrors((prev) => ({
+        ...prev,
+        [asg.id]: err.message || "Failed to claim Interaction ID.",
+      }));
+    } finally {
+      setCheckingId(null);
+    }
   }
 
   // Handle pushing a Partial assignment to Google Sheet
@@ -346,6 +519,7 @@ export function AssignmentsView({ userEmail, initialWebAppUrl }: AssignmentsView
               <thead>
                 <tr className="border-b border-slate-200 dark:border-slate-800 bg-slate-50/75 dark:bg-slate-800/40 text-slate-500 dark:text-slate-400 font-medium">
                   <th className="py-3 px-4">Date</th>
+                  <th className="py-3 px-4">Interaction ID</th>
                   <th className="py-3 px-4">EID</th>
                   <th className="py-3 px-4">Agent Name</th>
                   <th className="py-3 px-4">Channel / Skill</th>
@@ -374,6 +548,43 @@ export function AssignmentsView({ userEmail, initialWebAppUrl }: AssignmentsView
                     >
                       <td className="py-3.5 px-4 font-mono font-medium text-slate-700 dark:text-slate-300 whitespace-nowrap">
                         {formatTableDate(asg.date)}
+                      </td>
+                      <td className="py-3.5 px-4">
+                        <div className="flex flex-col gap-1 min-w-[150px]">
+                          <div className="relative flex items-center">
+                            <input
+                              type="text"
+                              value={interactionInputs[asg.id] ?? evalMap[asg.id]?.interaction_id ?? ""}
+                              onChange={(e) => {
+                                const val = e.target.value;
+                                setInteractionInputs((prev) => ({ ...prev, [asg.id]: val }));
+                                if (rowErrors[asg.id]) {
+                                  setRowErrors((prev) => ({ ...prev, [asg.id]: null }));
+                                }
+                              }}
+                              onKeyDown={(e) => {
+                                if (e.key === "Enter") {
+                                  e.preventDefault();
+                                  handleInteractionSubmit(asg, e.currentTarget.value);
+                                }
+                              }}
+                              disabled={checkingId === asg.id}
+                              placeholder="Enter ID & Enter..."
+                              className="w-full text-xs font-mono px-2.5 py-1.5 rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-800 dark:text-slate-200 placeholder:text-slate-400 focus:outline-none focus:ring-1.5 focus:ring-blue-500 disabled:opacity-50 transition-all"
+                            />
+                            {checkingId === asg.id && (
+                              <Loader2 className="w-3.5 h-3.5 animate-spin text-blue-500 absolute right-2.5" />
+                            )}
+                          </div>
+                          {rowErrors[asg.id] && (
+                            <div className="flex items-center gap-1 text-[11px] font-medium text-rose-600 dark:text-rose-400 animate-fadeIn">
+                              <AlertCircle className="w-3 h-3 flex-shrink-0" />
+                              <span className="truncate" title={rowErrors[asg.id]!}>
+                                {rowErrors[asg.id]}
+                              </span>
+                            </div>
+                          )}
+                        </div>
                       </td>
                       <td className="py-3.5 px-4 font-mono text-slate-600 dark:text-slate-400 whitespace-nowrap">
                         {eid}
@@ -423,13 +634,21 @@ export function AssignmentsView({ userEmail, initialWebAppUrl }: AssignmentsView
                         </span>
                       </td>
                       <td className="py-3.5 px-4 text-right whitespace-nowrap">
-                        {asg.status === "Partial" ? (
+                        {(asg.status === "Partial" || asg.status === "Completed") ? (
                           <button
                             type="button"
                             onClick={() => handlePush(asg.id)}
                             disabled={pushingId === asg.id}
-                            title="Push evaluated record to Google Sheet"
-                            className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl font-semibold text-xs bg-blue-600 hover:bg-blue-700 active:bg-blue-800 text-white shadow-sm transition-all disabled:opacity-50"
+                            title={
+                              asg.status === "Completed"
+                                ? "Push latest updates to Google Sheet"
+                                : "Push evaluated record to Google Sheet"
+                            }
+                            className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl font-semibold text-xs text-white shadow-sm transition-all disabled:opacity-50 ${
+                              asg.status === "Completed"
+                                ? "bg-emerald-600 hover:bg-emerald-700 active:bg-emerald-800"
+                                : "bg-blue-600 hover:bg-blue-700 active:bg-blue-800"
+                            }`}
                           >
                             {pushingId === asg.id ? (
                               <>
@@ -443,11 +662,6 @@ export function AssignmentsView({ userEmail, initialWebAppUrl }: AssignmentsView
                               </>
                             )}
                           </button>
-                        ) : asg.status === "Completed" ? (
-                          <span className="inline-flex items-center gap-1 text-[11px] font-medium text-emerald-600 dark:text-emerald-400">
-                            <CheckCircle2 className="w-3.5 h-3.5" />
-                            Done
-                          </span>
                         ) : (
                           <span className="text-slate-400 dark:text-slate-500 text-xs">-</span>
                         )}
