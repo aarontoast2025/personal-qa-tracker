@@ -172,13 +172,14 @@ export async function POST(request: Request) {
     const config = await getWebAppConfig(supabase);
     const qaEmail = body.qaEmail || user?.email || "";
 
-    // 0. Primary Bridge: Fetch through Google Apps Script Web App (bypasses 401 domain restrictions)
-    let webAppInitData: any = null;
-    if (config.url) {
+    // 0. Primary Bridge: Use browser-provided initData (fetched via JSONP with Toast SSO cookies)
+    //    Only fall back to server-side fetch if browser didn't provide data
+    let webAppInitData: any = body.initData || null;
+    if (!webAppInitData && config.url) {
       try {
         webAppInitData = await fetchInitDataFromWebApp(config, qaEmail);
       } catch (gasErr: any) {
-        console.warn("Google Apps Script Web App fetch warning:", gasErr.message);
+        console.warn("Google Apps Script Web App server-side fetch failed (expected for Toast domain-restricted sheets):", gasErr.message);
       }
     }
 
