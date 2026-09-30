@@ -25,6 +25,7 @@ import {
 
 interface AssignmentsViewProps {
   userEmail: string;
+  initialWebAppUrl?: string;
 }
 
 // Format date for table display: e.g. "Sep 29, 2026, Tue"
@@ -38,8 +39,24 @@ function formatTableDate(dateStr: string): string {
   return dateStr;
 }
 
-export function AssignmentsView({ userEmail }: AssignmentsViewProps) {
+export function AssignmentsView({ userEmail, initialWebAppUrl }: AssignmentsViewProps) {
   const supabase = createClient();
+  const [webAppUrl, setWebAppUrl] = useState(initialWebAppUrl || DEFAULT_WEB_APP_URL);
+
+  useEffect(() => {
+    if (!initialWebAppUrl) {
+      supabase
+        .from("app_settings")
+        .select("google_web_app_url")
+        .limit(1)
+        .maybeSingle()
+        .then(({ data }) => {
+          if (data?.google_web_app_url) {
+            setWebAppUrl(data.google_web_app_url);
+          }
+        });
+    }
+  }, [initialWebAppUrl]);
 
   // Requirement: Default tab should be "Day"
   const [mode, setMode] = useState<ViewMode>("day");
@@ -130,7 +147,7 @@ export function AssignmentsView({ userEmail }: AssignmentsViewProps) {
       }
 
       // 2. Submit to Google Apps Script directly from the browser using active Toast session
-      const targetUrl = prepData.webAppUrl || DEFAULT_WEB_APP_URL;
+      const targetUrl = prepData.webAppUrl || webAppUrl || DEFAULT_WEB_APP_URL;
       await submitEvaluationBrowser(
         targetUrl,
         DEFAULT_API_TOKEN,
@@ -221,7 +238,7 @@ export function AssignmentsView({ userEmail }: AssignmentsViewProps) {
           </div>
 
           {/* Icon-Only Fetch Button (Requirement: Icon only, no text) */}
-          <FetchButton userEmail={userEmail} onSyncComplete={handleSyncSuccess} />
+          <FetchButton webAppUrl={webAppUrl} userEmail={userEmail} onSyncComplete={handleSyncSuccess} />
         </div>
       </div>
 

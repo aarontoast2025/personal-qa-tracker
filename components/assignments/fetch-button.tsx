@@ -32,10 +32,16 @@ export function FetchButton({
     try {
       // 1. Fetch live data directly from Google Apps Script via browser session (attaches Toast Okta cookies)
       let initData: any = null;
+      let browserError: string | null = null;
       try {
         initData = await fetchInitDataBrowser(webAppUrl, DEFAULT_API_TOKEN, userEmail);
       } catch (browserErr: any) {
-        console.warn("Browser JSONP fetch warning, falling back to server:", browserErr.message);
+        browserError = browserErr.message;
+        console.warn("Browser JSONP fetch error:", browserErr);
+      }
+
+      if (!initData && browserError) {
+        throw new Error(browserError);
       }
 
       // 2. Ingest and persist data in Supabase via API

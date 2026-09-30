@@ -1,7 +1,7 @@
 import { SupabaseClient } from "@supabase/supabase-js";
 
 export const DEFAULT_WEB_APP_URL =
-  "https://script.google.com/macros/s/AKfycbyI2cDSGLZokRPesN_f-LmdSp2YLXzY3aXYpyrq2_Kzh9_vYCQOsyQtw0L-7wwHQ3lFEQ/exec";
+  "https://script.google.com/a/macros/toasttab.com/s/AKfycbzRI2l-Q9Xxz6zrFQpPAj3c4OjFk3SQmUjsAQTtglOdFg7rakCajtw7SO6hgXueq54lqA/exec";
 export const DEFAULT_API_TOKEN = "toast_qa_bookmarklet_2026";
 
 export interface WebAppConfig {
@@ -38,10 +38,12 @@ export async function getWebAppConfig(supabase?: SupabaseClient): Promise<WebApp
 export function normalizeWebAppUrl(rawUrl: string): string {
   let val = (rawUrl || "").split("?")[0].split("#")[0].trim();
   if (!val) return DEFAULT_WEB_APP_URL;
-  // If user pastes domain-scoped URL (/a/macros/toasttab.com/s/...), normalize to standard /macros/s/...
-  val = val.replace(/\/a\/macros\/[^/]+\//, "/macros/");
   if (val.startsWith("http://") || val.startsWith("https://")) {
-    if (val.includes("/macros/s/") && !val.endsWith("/exec") && !val.endsWith("/dev")) {
+    if (
+      (val.includes("/macros/s/") || val.includes("/a/macros/")) &&
+      !val.endsWith("/exec") &&
+      !val.endsWith("/dev")
+    ) {
       val = val.replace(/\/?$/, "/exec");
     }
     return val;

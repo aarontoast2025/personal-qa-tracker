@@ -7,5 +7,16 @@ export default async function AssignmentsPage() {
     data: { user },
   } = await supabase.auth.getUser();
 
-  return <AssignmentsView userEmail={user?.email || ""} />;
+  const { data: settings } = await supabase
+    .from("app_settings")
+    .select("google_web_app_url")
+    .limit(1)
+    .maybeSingle();
+
+  return (
+    <AssignmentsView
+      userEmail={user?.email || ""}
+      initialWebAppUrl={settings?.google_web_app_url || ""}
+    />
+  );
 }

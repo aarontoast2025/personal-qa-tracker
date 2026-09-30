@@ -255,7 +255,7 @@ export async function fetchInitDataBrowser(
       token,
       qa_email: qaEmail.toLowerCase().trim(),
     },
-    30000
+    60000
   );
 
   if (!data || data.success === false) {
