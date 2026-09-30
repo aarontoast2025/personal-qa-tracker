@@ -22,6 +22,7 @@ import {
   Filter,
   Loader2,
   Search,
+  Trash2,
   UploadCloud,
 } from "lucide-react";
 
@@ -72,6 +73,7 @@ export function AssignmentsView({ userEmail, initialWebAppUrl }: AssignmentsView
   const [searchQuery, setSearchQuery] = useState("");
   const [syncNotice, setSyncNotice] = useState<string | null>(null);
   const [pushingId, setPushingId] = useState<string | null>(null);
+  const [deletingId, setDeletingId] = useState<string | null>(null);
 
   const [evalMap, setEvalMap] = useState<Record<string, any>>({});
   const [interactionInputs, setInteractionInputs] = useState<Record<string, string>>({});
@@ -363,6 +365,77 @@ export function AssignmentsView({ userEmail, initialWebAppUrl }: AssignmentsView
     }
   }
 
+  // Handle deleting an assignment and its evaluations from Supabase
+  async function handleDelete(asg: Assignment) {
+    if (deletingId || pushingId) return;
+
+    const agentLabel =
+      asg.agent_snapshot?.displayName ||
+      asg.agent_snapshot?.fullName ||
+      asg.agent_email;
+
+    const confirmMsg = `Are you sure you want to delete assignment ${asg.id} (${agentLabel}) from Supabase?\n\nThis will remove the assignment and any drafted evaluation from the database.`;
+    if (!window.confirm(confirmMsg)) return;
+
+    setDeletingId(asg.id);
+    setRowErrors((prev) => ({ ...prev, [asg.id]: null }));
+
+    try {
+      const evalRecord = evalMap[asg.id];
+      const res = await fetch("/api/assignments/delete", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          assignmentId: asg.id,
+          evaluationId: evalRecord?.id,
+        }),
+      });
+
+      const resData = await res.json();
+      if (!res.ok || !resData.success) {
+        // Fallback: direct client deletion if API route encounters an error
+        const { error: clientEvalErr } = await supabase
+          .from("evaluations")
+          .delete()
+          .eq("assignment_id", asg.id);
+        if (clientEvalErr) console.warn("Client fallback eval delete warning:", clientEvalErr.message);
+
+        const { error: clientAsgErr } = await supabase
+          .from("assignments")
+          .delete()
+          .eq("id", asg.id);
+
+        if (clientAsgErr) {
+          throw new Error(resData?.error || clientAsgErr.message || "Failed to delete assignment record.");
+        }
+      }
+
+      // Update local state
+      setAssignments((prev) => prev.filter((a) => a.id !== asg.id));
+      setEvalMap((prev) => {
+        const next = { ...prev };
+        delete next[asg.id];
+        return next;
+      });
+      setInteractionInputs((prev) => {
+        const next = { ...prev };
+        delete next[asg.id];
+        return next;
+      });
+      setTotalUserAssignments((prev) => Math.max(0, prev - 1));
+      setSyncNotice(`Assignment ${asg.id} successfully deleted from Supabase.`);
+      setTimeout(() => setSyncNotice(null), 4000);
+    } catch (err: any) {
+      console.error("Delete error:", err);
+      setRowErrors((prev) => ({
+        ...prev,
+        [asg.id]: err.message || "Failed to delete assignment.",
+      }));
+    } finally {
+      setDeletingId(null);
+    }
+  }
+
   // Filtered by status and search
   const filteredAssignments = assignments.filter((item) => {
     if (statusFilter !== "all" && item.status !== statusFilter) {
@@ -641,37 +714,50 @@ export function AssignmentsView({ userEmail, initialWebAppUrl }: AssignmentsView
                         </span>
                       </td>
                       <td className="py-3.5 px-4 text-right whitespace-nowrap">
-                        {(asg.status === "Partial" || asg.status === "Completed") ? (
+                        <div className="inline-flex items-center justify-end gap-1.5">
+                          {(asg.status === "Partial" || asg.status === "Completed") && (
+                            <button
+                              type="button"
+                              onClick={() => handlePush(asg.id)}
+                              disabled={pushingId === asg.id || deletingId === asg.id}
+                              title={
+                                asg.status === "Completed"
+                                  ? "Push latest updates to Google Sheet"
+                                  : "Push evaluated record to Google Sheet"
+                              }
+                              className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl font-semibold text-xs text-white shadow-sm transition-all disabled:opacity-50 ${
+                                asg.status === "Completed"
+                                  ? "bg-emerald-600 hover:bg-emerald-700 active:bg-emerald-800"
+                                  : "bg-blue-600 hover:bg-blue-700 active:bg-blue-800"
+                              }`}
+                            >
+                              {pushingId === asg.id ? (
+                                <>
+                                  <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                                  <span>Pushing...</span>
+                                </>
+                              ) : (
+                                <>
+                                  <UploadCloud className="w-3.5 h-3.5" />
+                                  <span>Push</span>
+                                </>
+                              )}
+                            </button>
+                          )}
                           <button
                             type="button"
-                            onClick={() => handlePush(asg.id)}
-                            disabled={pushingId === asg.id}
-                            title={
-                              asg.status === "Completed"
-                                ? "Push latest updates to Google Sheet"
-                                : "Push evaluated record to Google Sheet"
-                            }
-                            className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl font-semibold text-xs text-white shadow-sm transition-all disabled:opacity-50 ${
-                              asg.status === "Completed"
-                                ? "bg-emerald-600 hover:bg-emerald-700 active:bg-emerald-800"
-                                : "bg-blue-600 hover:bg-blue-700 active:bg-blue-800"
-                            }`}
+                            onClick={() => handleDelete(asg)}
+                            disabled={deletingId === asg.id || pushingId === asg.id}
+                            title="Delete assignment and evaluation from Supabase"
+                            className="p-1.5 rounded-xl text-slate-400 hover:text-rose-600 hover:bg-rose-50 dark:hover:bg-rose-950/30 transition-colors disabled:opacity-50"
                           >
-                            {pushingId === asg.id ? (
-                              <>
-                                <Loader2 className="w-3.5 h-3.5 animate-spin" />
-                                <span>Pushing...</span>
-                              </>
+                            {deletingId === asg.id ? (
+                              <Loader2 className="w-4 h-4 animate-spin text-rose-500" />
                             ) : (
-                              <>
-                                <UploadCloud className="w-3.5 h-3.5" />
-                                <span>Push</span>
-                              </>
+                              <Trash2 className="w-4 h-4" />
                             )}
                           </button>
-                        ) : (
-                          <span className="text-slate-400 dark:text-slate-500 text-xs">-</span>
-                        )}
+                        </div>
                       </td>
                     </tr>
                   );
