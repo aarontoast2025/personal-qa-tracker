@@ -124,7 +124,11 @@ export function browserFormPostRequest<T = any>(
       if (!isHandled) {
         isHandled = true;
         cleanup();
-        resolve({ success: true, message: "Saved via background browser form" } as any);
+        reject(
+          new Error(
+            "Google Apps Script form post timed out. Please ensure you are logged into your Toast Google account."
+          )
+        );
       }
     }, timeoutMs);
 
@@ -176,22 +180,65 @@ export function browserFormPostRequest<T = any>(
       }, 1000);
     };
 
-    iframe.onload = () => {
-      // If no postMessage received within 2s of frame load, assume success
-      setTimeout(() => {
-        if (!isHandled) {
-          isHandled = true;
-          clearTimeout(timeoutId);
-          cleanup();
-          resolve({ success: true } as any);
-        }
-      }, 2000);
-    };
-
     document.body.appendChild(iframe);
     document.body.appendChild(form);
     form.submit();
   });
+}
+
+/**
+ * Normalizes and compacts evaluation data for browser transport.
+ * Keeps payload lightweight and under browser/GFE GET query length limits.
+ */
+export function compactEvaluationData(data: Record<string, any>): Record<string, any> {
+  const clone = { ...data };
+
+  // Compact agent snapshot to avoid unnecessary metadata bloat in URL
+  if (clone.agentSnapshot && typeof clone.agentSnapshot === "object") {
+    clone.agentSnapshot = {
+      fullName:
+        clone.agentSnapshot.fullName ||
+        clone.agentSnapshot.displayName ||
+        clone.agentName ||
+        "",
+      displayName: clone.agentSnapshot.displayName || clone.agentName || "",
+      toasttabEmail:
+        clone.agentSnapshot.toasttabEmail || clone.agentEmail || "",
+      role: clone.agentSnapshot.role || "Agent",
+    };
+  }
+
+  // Ensure details is an object and compact each question entry
+  if (clone.details) {
+    let detailsObj = clone.details;
+    if (typeof detailsObj === "string") {
+      try {
+        detailsObj = JSON.parse(detailsObj);
+      } catch {
+        detailsObj = {};
+      }
+    }
+
+    if (typeof detailsObj === "object" && detailsObj !== null) {
+      const compactDetails: Record<string, any[]> = {};
+      Object.keys(detailsObj).forEach((secKey) => {
+        const items = detailsObj[secKey];
+        if (Array.isArray(items)) {
+          compactDetails[secKey] = items.map((item: any) => ({
+            question: item.question || "",
+            selected: item.selected || "",
+            points: typeof item.points === "number" ? item.points : Number(item.points || 0),
+            isCorrect: item.isCorrect !== false,
+            feedback: item.feedback || item.feedbackText || "",
+            ...(item.feedbackChips?.length ? { feedbackChips: item.feedbackChips } : {}),
+          }));
+        }
+      });
+      clone.details = compactDetails;
+    }
+  }
+
+  return clone;
 }
 
 /**
@@ -267,7 +314,8 @@ export async function fetchInitDataBrowser(
 
 /**
  * Submits an evaluation to Google Apps Script from the browser.
- * Uses formPostRequest with JSONP fallback.
+ * Uses JSONP as the primary authenticated transport (compatible with domain-restricted Google Workspace)
+ * with hidden iframe form POST as fallback.
  */
 export async function submitEvaluationBrowser(
   url: string = DEFAULT_WEB_APP_URL,
@@ -275,22 +323,48 @@ export async function submitEvaluationBrowser(
   qaEmail: string,
   evaluationData: Record<string, any>
 ): Promise<any> {
-  const payload = {
-    action: "submit_evaluation",
-    token,
-    qaEmail: qaEmail.toLowerCase().trim(),
-    evaluationData,
-  };
+  const targetUrl = (url || DEFAULT_WEB_APP_URL).trim();
+  const email = (qaEmail || "").toLowerCase().trim();
+  const compactData = compactEvaluationData(evaluationData);
 
+  // 1. Primary transport: Browser JSONP (bypasses cross-origin cookie / iframe blocking in domain-restricted Toast GAS)
   try {
-    return await browserFormPostRequest(url, payload);
-  } catch (err: any) {
-    console.warn("Form post failed, attempting JSONP submit fallback:", err.message);
-    return await browserJsonpRequest(url, {
+    const res = await browserJsonpRequest<any>(
+      targetUrl,
+      {
+        action: "submit_evaluation",
+        token: token || DEFAULT_API_TOKEN,
+        qa_email: email,
+        payload: JSON.stringify(compactData),
+      },
+      30000
+    );
+
+    if (res && res.success !== false) {
+      return res;
+    }
+    throw new Error(
+      res?.message || res?.error || "Google Apps Script rejected the submission."
+    );
+  } catch (jsonpErr: any) {
+    console.warn("JSONP submit failed, attempting form post fallback:", jsonpErr.message);
+
+    // 2. Fallback transport: Form post into hidden iframe
+    const fallbackRes = await browserFormPostRequest(targetUrl, {
       action: "submit_evaluation",
-      token,
-      qa_email: qaEmail,
-      payload: JSON.stringify(evaluationData),
+      token: token || DEFAULT_API_TOKEN,
+      qaEmail: email,
+      evaluationData: compactData,
     });
+
+    if (fallbackRes && fallbackRes.success !== false) {
+      return fallbackRes;
+    }
+    throw new Error(
+      fallbackRes?.message ||
+        fallbackRes?.error ||
+        jsonpErr.message ||
+        "Failed to submit evaluation to Google Apps Script."
+    );
   }
 }

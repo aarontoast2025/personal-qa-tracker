@@ -215,10 +215,9 @@
                 if (!isHandled) {
                     isHandled = true;
                     cleanup();
-                    // Resolves gracefully after timeout
-                    resolve({ success: true, message: 'Saved via background form' });
+                    reject(new Error("Google Apps Script form post timed out. Please ensure you are logged into your Toast Google account."));
                 }
-            }, 8000);
+            }, 15000);
 
             var messageHandler = function(event) {
                 if (event.data && (event.data.type === 'TOAST_QA_RESPONSE' || (event.data.data && event.data.data.success))) {
@@ -243,17 +242,6 @@
                     if (iframe.parentNode) iframe.parentNode.removeChild(iframe);
                     if (form.parentNode) form.parentNode.removeChild(form);
                 }, 1000);
-            };
-
-            iframe.onload = function() {
-                setTimeout(function(){
-                    if (!isHandled) {
-                        isHandled = true;
-                        clearTimeout(timeoutId);
-                        cleanup();
-                        resolve({ success: true });
-                    }
-                }, 1500);
             };
 
             var form = document.createElement('form');
@@ -2620,34 +2608,60 @@
             var gasTargetUrl = GAS_URL || DEFAULT_GAS_URL;
             if (!gasTargetUrl) return Promise.resolve();
 
-            var gasPayload = {
+            var compactSnap = null;
+            if (agentSnap && typeof agentSnap === 'object') {
+                compactSnap = {
+                    fullName: agentSnap.fullName || agentSnap.displayName || resolvedAgentName || '',
+                    displayName: agentSnap.displayName || resolvedAgentName || '',
+                    toasttabEmail: agentSnap.toasttabEmail || selectedAgentEmail || '',
+                    role: agentSnap.role || 'Agent'
+                };
+            }
+
+            var evalData = {
+                assignmentId: selectedAssignmentId || '',
+                interactionId: inpInteractionId.value.trim(),
+                agentName: resolvedAgentName,
+                agentEmail: selectedAgentEmail,
+                agentSnapshot: compactSnap,
+                evaluationType: (selEvalType && selEvalType.value) ? selEvalType.value : ((selectedAsg && (selectedAsg.evaluationType || selectedAsg.evaluation_type)) || 'Manual Audit'),
+                callAniDnis: selAni.value ? selAni.value.trim() : "",
+                caseNo: inpCaseNo.value.trim(),
+                callDuration: inpDuration.value.trim(),
+                dateOfInteraction: inpDateInteraction.value,
+                evaluationDate: inpDateEvaluation.value,
+                caseCategory: inpCategory.value.trim(),
+                caseSubCategory: inpSubCategory.value.trim(),
+                issueConcern: txtIssue.value.trim(),
+                rubricId: (currentRubric && currentRubric.id) || '',
+                score: 0,
+                status: 'Partial',
+                isPartial: true
+            };
+
+            var targetEmail = (QA_EMAIL || storage.get('qa_email', '')).trim().toLowerCase();
+
+            // 1. Primary transport: Browser JSONP (bypasses third-party cookie/iframe restrictions in domain-restricted Toast GAS)
+            return jsonpRequest(gasTargetUrl, {
                 action: 'submit_evaluation',
                 token: API_TOKEN || DEFAULT_API_TOKEN,
-                qaEmail: QA_EMAIL,
-                format: 'iframe',
-                evaluationData: {
-                    assignmentId: selectedAssignmentId || '',
-                    interactionId: inpInteractionId.value.trim(),
-                    agentName: resolvedAgentName,
-                    agentEmail: selectedAgentEmail,
-                    agentSnapshot: agentSnap,
-                    evaluationType: (selEvalType && selEvalType.value) ? selEvalType.value : ((selectedAsg && (selectedAsg.evaluationType || selectedAsg.evaluation_type)) || 'Manual Audit'),
-                    callAniDnis: selAni.value ? selAni.value.trim() : "",
-                    caseNo: inpCaseNo.value.trim(),
-                    callDuration: inpDuration.value.trim(),
-                    dateOfInteraction: inpDateInteraction.value,
-                    evaluationDate: inpDateEvaluation.value,
-                    caseCategory: inpCategory.value.trim(),
-                    caseSubCategory: inpSubCategory.value.trim(),
-                    issueConcern: txtIssue.value.trim(),
-                    rubricId: (currentRubric && currentRubric.id) || '',
-                    score: 0,
-                    status: 'Partial',
-                    isPartial: true
+                qa_email: targetEmail,
+                payload: JSON.stringify(evalData)
+            }).then(function(res){
+                if (!res || res.success === false) {
+                    throw new Error((res && (res.message || res.error)) || "Google Apps Script rejected Partial claim.");
                 }
-            };
-            return formPostRequest(gasTargetUrl, gasPayload).catch(function(e){
-                console.warn("Push partial claim to sheet warning:", e);
+                return res;
+            }).catch(function(jsonpErr){
+                console.warn("JSONP partial push failed, attempting form post fallback:", jsonpErr.message);
+                // 2. Fallback transport: Form post into hidden iframe
+                return formPostRequest(gasTargetUrl, {
+                    action: 'submit_evaluation',
+                    token: API_TOKEN || DEFAULT_API_TOKEN,
+                    qaEmail: targetEmail,
+                    format: 'iframe',
+                    evaluationData: evalData
+                });
             });
         };
 

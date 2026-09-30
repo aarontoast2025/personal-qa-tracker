@@ -260,6 +260,7 @@ export function AssignmentsView({ userEmail, initialWebAppUrl }: AssignmentsView
       }
 
       // 5. Push Partial claim immediately to Google Sheet (so teammates see it claimed with updated timestamp)
+      let sheetPushed = false;
       if (targetUrl) {
         try {
           await submitEvaluationBrowser(
@@ -279,6 +280,7 @@ export function AssignmentsView({ userEmail, initialWebAppUrl }: AssignmentsView
               isPartial: true,
             }
           );
+          sheetPushed = true;
         } catch (pushErr: any) {
           console.warn("Could not push partial claim to sheet:", pushErr.message);
         }
@@ -289,7 +291,11 @@ export function AssignmentsView({ userEmail, initialWebAppUrl }: AssignmentsView
       setAssignments((prev) =>
         prev.map((a) => (a.id === asg.id ? { ...a, status: "Partial" } : a))
       );
-      setSyncNotice(`Interaction ID "${trimmed}" claimed and saved as Partial!`);
+      if (sheetPushed) {
+        setSyncNotice(`Interaction ID "${trimmed}" claimed and synced to Google Sheet as Partial!`);
+      } else {
+        setSyncNotice(`Interaction ID "${trimmed}" saved in Supabase as Partial (Google Sheet sync pending).`);
+      }
       setTimeout(() => setSyncNotice(null), 4000);
     } catch (err: any) {
       console.error("Interaction submit error:", err);
@@ -306,6 +312,7 @@ export function AssignmentsView({ userEmail, initialWebAppUrl }: AssignmentsView
   async function handlePush(asgId: string) {
     if (pushingId) return;
     setPushingId(asgId);
+    setRowErrors((prev) => ({ ...prev, [asgId]: null }));
 
     try {
       // 1. Prepare evaluation data from Supabase
