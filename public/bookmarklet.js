@@ -61,7 +61,6 @@
     var SUPABASE_URL = DEFAULT_SUPABASE_URL;
     var SUPABASE_KEY = DEFAULT_SUPABASE_KEY;
     var DEFAULT_GAS_URL = 'https://script.google.com/a/macros/toasttab.com/s/AKfycbzRI2l-Q9Xxz6zrFQpPAj3c4OjFk3SQmUjsAQTtglOdFg7rakCajtw7SO6hgXueq54lqA/exec';
-    var GAS_URL = storage.get('gas_url', DEFAULT_GAS_URL);
 
     var DEFAULT_FALLBACK_RUBRIC = {
         id: 'toast-standard-qa',
@@ -314,6 +313,7 @@
     var API_TOKEN = storage.get('api_token', DEFAULT_API_TOKEN);
     SUPABASE_URL = storage.get('supabase_url', DEFAULT_SUPABASE_URL);
     SUPABASE_KEY = storage.get('supabase_key', DEFAULT_SUPABASE_KEY);
+    var GAS_URL = storage.get('gas_url', DEFAULT_GAS_URL);
 
     // Supabase REST client for cross-origin Bookmarklet operations
     var supabaseFetch = function(endpoint, method, payload, preferHeader) {
