@@ -3,6 +3,7 @@
 import { revalidatePath } from "next/cache";
 import { createClient } from "@/lib/supabase/server";
 import { extractSheetId } from "@/lib/google/sheets";
+import { normalizeWebAppUrl } from "@/lib/google/web-app-client";
 
 export async function saveGoogleSheetId(formData: FormData) {
   const rawInput = (formData.get("google_sheet_id") as string) || "";
@@ -31,7 +32,7 @@ export async function saveGoogleSheetId(formData: FormData) {
     updated_at: new Date().toISOString(),
   };
   if (webAppUrlInput) {
-    updatePayload.google_web_app_url = webAppUrlInput;
+    updatePayload.google_web_app_url = normalizeWebAppUrl(webAppUrlInput);
   }
 
   let error;

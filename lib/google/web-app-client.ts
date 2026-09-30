@@ -35,6 +35,43 @@ export async function getWebAppConfig(supabase?: SupabaseClient): Promise<WebApp
   };
 }
 
+export function normalizeWebAppUrl(rawUrl: string): string {
+  let val = (rawUrl || "").split("?")[0].split("#")[0].trim();
+  if (!val) return DEFAULT_WEB_APP_URL;
+  // If user pastes domain-scoped URL (/a/macros/toasttab.com/s/...), normalize to standard /macros/s/...
+  val = val.replace(/\/a\/macros\/[^/]+\//, "/macros/");
+  if (val.startsWith("http://") || val.startsWith("https://")) {
+    if (val.includes("/macros/s/") && !val.endsWith("/exec") && !val.endsWith("/dev")) {
+      val = val.replace(/\/?$/, "/exec");
+    }
+    return val;
+  }
+  return `https://script.google.com/macros/s/${val}/exec`;
+}
+
+async function parseJsonOrDiagnose(res: Response, context: string): Promise<any> {
+  const text = await res.text();
+  if (
+    text.includes("<!DOCTYPE") ||
+    text.includes("<html") ||
+    res.url.includes("accounts.google.com") ||
+    res.url.includes("okta.com") ||
+    text.includes("ServiceLogin")
+  ) {
+    throw new Error(
+      "Google redirected the request to a Google/Okta login page. In Google Apps Script, please edit your Web App deployment: set 'Execute as: Me' and 'Who has access: Anyone'."
+    );
+  }
+
+  try {
+    return JSON.parse(text);
+  } catch {
+    throw new Error(
+      `${context}: Received non-JSON response from Google Apps Script (${text.slice(0, 120)}...)`
+    );
+  }
+}
+
 export async function testWebAppConnection(
   customUrl?: string,
   customToken?: string
@@ -44,7 +81,7 @@ export async function testWebAppConnection(
   data?: any;
   error?: string;
 }> {
-  const url = (customUrl || DEFAULT_WEB_APP_URL).trim();
+  const url = normalizeWebAppUrl(customUrl || DEFAULT_WEB_APP_URL);
   const token = (customToken || DEFAULT_API_TOKEN).trim();
   const startTime = Date.now();
 
@@ -66,7 +103,7 @@ export async function testWebAppConnection(
       };
     }
 
-    const data = await res.json();
+    const data = await parseJsonOrDiagnose(res, "Test Connection");
     if (!data || data.success === false) {
       return {
         ok: false,
@@ -93,7 +130,8 @@ export async function fetchInitDataFromWebApp(
   config: WebAppConfig,
   qaEmail: string = ""
 ): Promise<any> {
-  const fullUrl = `${config.url}?action=get_init_data&token=${encodeURIComponent(
+  const url = normalizeWebAppUrl(config.url);
+  const fullUrl = `${url}?action=get_init_data&token=${encodeURIComponent(
     config.token
   )}&qa_email=${encodeURIComponent(qaEmail)}`;
 
@@ -109,7 +147,7 @@ export async function fetchInitDataFromWebApp(
     );
   }
 
-  const data = await res.json();
+  const data = await parseJsonOrDiagnose(res, "Fetch Init Data");
   if (!data || data.success === false) {
     throw new Error(
       data?.error || "Google Apps Script Web App returned unsuccessful response"
@@ -131,6 +169,7 @@ export async function submitEvaluationToWebApp(
   message?: string;
   error?: string;
 }> {
+  const url = normalizeWebAppUrl(config.url);
   const payload = {
     action: "submit_evaluation",
     token: config.token,
@@ -138,7 +177,7 @@ export async function submitEvaluationToWebApp(
     evaluationData,
   };
 
-  const res = await fetch(config.url, {
+  const res = await fetch(url, {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
@@ -153,7 +192,7 @@ export async function submitEvaluationToWebApp(
     );
   }
 
-  const data = await res.json();
+  const data = await parseJsonOrDiagnose(res, "Submit Evaluation");
   if (!data || data.success === false) {
     throw new Error(
       data?.error || data?.message || "Failed to save evaluation in Google Sheet"
