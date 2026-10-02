@@ -21,6 +21,22 @@ export async function GET(request: Request) {
 
     const supabase = await createClient();
 
+    // Build email variants to match corporate Toast and personal email aliases
+    const emailVariants = Array.from(
+      new Set(
+        [
+          qaEmail,
+          qaEmail.includes("toasttab.com") ? qaEmail.replace("@toasttab.com", "@gmail.com") : null,
+          qaEmail.includes("toasttab.com") && qaEmail.startsWith("aaron.") ? "aaron.toast2025@gmail.com" : null,
+          qaEmail.includes("gmail.com") ? qaEmail.replace("@gmail.com", "@toasttab.com") : null,
+          qaEmail.includes("gmail.com") && (qaEmail.includes("toast2025") || qaEmail.startsWith("aaron.")) ? "aaron.arela@toasttab.com" : null,
+        ].filter(Boolean) as string[]
+      )
+    );
+
+    const emailOrFilter = emailVariants.map((e) => `qa_email.ilike.${e}`).join(",");
+    const createdByOrFilter = emailVariants.map((e) => `created_by.ilike.${e}`).join(",");
+
     // Fetch user settings, assignments, rubrics, and templates concurrently
     const [
       { data: settings },
@@ -33,14 +49,14 @@ export async function GET(request: Request) {
       supabase
         .from("assignments")
         .select("*")
-        .eq("qa_email", qaEmail)
+        .or(emailOrFilter)
         .order("date", { ascending: false }),
       supabase.from("rubrics").select("*"),
       supabase.from("rubric_descriptions").select("*"),
       supabase
         .from("feedback_templates")
         .select("*")
-        .ilike("created_by", qaEmail),
+        .or(createdByOrFilter),
     ]);
 
     if (asgErr) console.warn("Bookmarklet init assignments warning:", asgErr.message);

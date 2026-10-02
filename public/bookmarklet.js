@@ -350,6 +350,30 @@
     var currentRubric = DEFAULT_FALLBACK_RUBRIC;
     var globalFeedbackGeneral = [];
     var globalFeedbackTags = [];
+
+    var isSameTag = function(a, b) {
+        if (!a || !b) return false;
+        var aId = a.id || a.ID;
+        var bId = b.id || b.ID;
+        if (aId && bId && String(aId) === String(bId)) {
+            return true;
+        }
+        var aLabel = (a.buttonLabel || a.button_label || a.tagLabel || a.tag_label || '').trim().toLowerCase();
+        var bLabel = (b.buttonLabel || b.button_label || b.tagLabel || b.tag_label || '').trim().toLowerCase();
+        return aLabel !== '' && aLabel === bLabel;
+    };
+
+    var isUserMatch = function(owner, targetEmail) {
+        if (!owner) return true;
+        if (!targetEmail) return true;
+        var o = String(owner).trim().toLowerCase();
+        var t = String(targetEmail).trim().toLowerCase();
+        if (o === t) return true;
+        var oPrefix = o.split('@')[0].replace('toast2025', 'arela');
+        var tPrefix = t.split('@')[0].replace('toast2025', 'arela');
+        if (oPrefix === tPrefix) return true;
+        return false;
+    };
     var globalRubricDescriptions = [];
     var globalUsers = [];
     var globalAssignments = [];
@@ -885,16 +909,20 @@
 
             var optionsDetailed = (s.options || []).map(function(o, optIdx){
                 var genFeedback = globalFeedbackGeneral.find(function(f){
-                    var matchRubric = !f.rubricId || !currentRubric || !currentRubric.id || String(f.rubricId) === String(currentRubric.id);
-                    var matchSec = (f.sectionIndex === s.secIdx || f.section_index === s.secIdx);
-                    var matchItem = (f.itemIndex === s.itemIdx || f.item_index === s.itemIdx);
-                    var matchOpt = (f.optionIndex === optIdx || f.option_index === optIdx);
-                    return matchRubric && matchSec && matchItem && matchOpt;
+                    var fRubric = f.rubricId || f.rubric_id;
+                    var matchRubric = !fRubric || !currentRubric || !currentRubric.id || String(fRubric) === String(currentRubric.id);
+                    var fSec = Number(f.sectionIndex !== undefined ? f.sectionIndex : f.section_index);
+                    var fItem = Number(f.itemIndex !== undefined ? f.itemIndex : f.item_index);
+                    var fOpt = Number(f.optionIndex !== undefined ? f.optionIndex : f.option_index);
+                    return matchRubric && fSec === Number(s.secIdx) && fItem === Number(s.itemIdx) && fOpt === Number(optIdx);
                 });
                 var optionChips = globalFeedbackTags.filter(function(t){
-                    return (t.sectionIndex === s.secIdx || t.section_index === s.secIdx) &&
-                           (t.itemIndex === s.itemIdx || t.item_index === s.itemIdx) &&
-                           (t.optionIndex === optIdx || t.option_index === optIdx);
+                    var tRubric = t.rubricId || t.rubric_id;
+                    var matchRubric = !tRubric || !currentRubric || !currentRubric.id || String(tRubric) === String(currentRubric.id);
+                    var tSec = Number(t.sectionIndex !== undefined ? t.sectionIndex : t.section_index);
+                    var tItem = Number(t.itemIndex !== undefined ? t.itemIndex : t.item_index);
+                    var tOpt = Number(t.optionIndex !== undefined ? t.optionIndex : t.option_index);
+                    return matchRubric && tSec === Number(s.secIdx) && tItem === Number(s.itemIdx) && tOpt === Number(optIdx);
                 }).map(function(t){
                     return cleanFbText(t.feedbackText || t.feedback_text || t.buttonLabel || t.button_label || '');
                 }).filter(Boolean);
@@ -1764,11 +1792,12 @@
             txt = s.selectedTags.map(function(t){ return cleanText(t.feedbackText || t.feedback_text); }).join(" ");
         } else {
             var genFeedback = globalFeedbackGeneral.find(function(f){
-                var matchRubric = !f.rubricId || !currentRubric || !currentRubric.id || String(f.rubricId) === String(currentRubric.id);
-                var matchSec = (f.sectionIndex === s.secIdx || f.section_index === s.secIdx);
-                var matchItem = (f.itemIndex === s.itemIdx || f.item_index === s.itemIdx);
-                var matchOpt = (f.optionIndex === s.selIndex || f.option_index === s.selIndex);
-                return matchRubric && matchSec && matchItem && matchOpt;
+                var fRubric = f.rubricId || f.rubric_id;
+                var matchRubric = !fRubric || !currentRubric || !currentRubric.id || String(fRubric) === String(currentRubric.id);
+                var fSec = Number(f.sectionIndex !== undefined ? f.sectionIndex : f.section_index);
+                var fItem = Number(f.itemIndex !== undefined ? f.itemIndex : f.item_index);
+                var fOpt = Number(f.optionIndex !== undefined ? f.optionIndex : f.option_index);
+                return matchRubric && fSec === Number(s.secIdx) && fItem === Number(s.itemIdx) && fOpt === Number(s.selIndex);
             });
             if (genFeedback) {
                 txt = cleanText(genFeedback.feedbackText || genFeedback.feedback_text);
@@ -2101,18 +2130,22 @@
                     tagContainer.innerHTML = "";
                     var currentOptIdx = state[key].selIndex;
                     var relevantTags = globalFeedbackTags.filter(function(t){
-                        var matchRubric = !t.rubricId || !currentRubric || !currentRubric.id || String(t.rubricId) === String(currentRubric.id);
+                        var fRubric = t.rubricId || t.rubric_id;
+                        var matchRubric = !fRubric || !currentRubric || !currentRubric.id || String(fRubric) === String(currentRubric.id);
+                        var fSec = Number(t.sectionIndex !== undefined ? t.sectionIndex : t.section_index);
+                        var fItem = Number(t.itemIndex !== undefined ? t.itemIndex : t.item_index);
+                        var fOpt = Number(t.optionIndex !== undefined ? t.optionIndex : t.option_index);
                         return matchRubric &&
-                               (t.sectionIndex === secIdx || t.section_index === secIdx) &&
-                               (t.itemIndex === itemIdx || t.item_index === itemIdx) &&
-                               (t.optionIndex === currentOptIdx || t.option_index === currentOptIdx);
+                               fSec === Number(secIdx) &&
+                               fItem === Number(itemIdx) &&
+                               fOpt === Number(currentOptIdx);
                     });
 
                     relevantTags.forEach(function(tagData){
                         var tagBtn = createElement("div");
                         var labelText = tagData.buttonLabel || tagData.button_label || tagData.tag_label || "Feedback";
                         var isActive = state[key].selectedTags.some(function(t){
-                            return (t.id && t.id === tagData.id) || (t.buttonLabel === labelText);
+                            return isSameTag(t, tagData);
                         });
 
                         var theme = getTheme({ options: options }, state[key].sel);
@@ -2126,9 +2159,10 @@
                         tagBtn.textContent = labelText;
 
                         addListener(tagBtn, "click", function(){
+                            state[key].isCustomUserText = false;
                             if(isActive) {
                                 state[key].selectedTags = state[key].selectedTags.filter(function(t){
-                                    return (t.id && t.id !== tagData.id) && (t.buttonLabel !== labelText);
+                                    return !isSameTag(t, tagData);
                                 });
                             } else {
                                 state[key].selectedTags.push(tagData);
@@ -2141,6 +2175,7 @@
                     });
                 };
                 state[key].renderTags = renderTags;
+                renderTags();
 
                 // Render based on uiType: 'dropdown' or 'buttons'
                 var isDropdown = (item.uiType === 'dropdown');
@@ -3963,24 +3998,33 @@
         var sKey = SUPABASE_KEY || storage.get('supabase_key', DEFAULT_SUPABASE_KEY);
         if (!sKey) return Promise.resolve(false);
         var targetQaEmail = (QA_EMAIL || storage.get('qa_email', DEFAULT_QA_EMAIL)).trim().toLowerCase();
-        var endpoint = 'feedback_templates?select=*&created_by=ilike.' + encodeURIComponent(targetQaEmail);
+        var emailVariants = [
+            targetQaEmail,
+            targetQaEmail.indexOf('toasttab.com') !== -1 ? targetQaEmail.replace('@toasttab.com', '@gmail.com') : null,
+            (targetQaEmail.indexOf('toasttab.com') !== -1 && targetQaEmail.indexOf('aaron.') === 0) ? 'aaron.toast2025@gmail.com' : null,
+            targetQaEmail.indexOf('gmail.com') !== -1 ? targetQaEmail.replace('@gmail.com', '@toasttab.com') : null,
+            (targetQaEmail.indexOf('gmail.com') !== -1 && (targetQaEmail.indexOf('toast2025') !== -1 || targetQaEmail.indexOf('aaron.') === 0)) ? 'aaron.arela@toasttab.com' : null
+        ].filter(Boolean);
+        var orFilter = emailVariants.map(function(e){ return 'created_by.ilike.' + encodeURIComponent(e); }).join(',');
+        var endpoint = 'feedback_templates?select=*&or=(' + orFilter + ')';
         return supabaseFetch(endpoint, 'GET')
             .then(function(rows) {
                 if (Array.isArray(rows)) {
                     var userRows = rows.filter(function(t){
                         var owner = (t.created_by || t.createdBy || '').trim().toLowerCase();
-                        return owner === targetQaEmail;
+                        return !owner || isUserMatch(owner, targetQaEmail);
                     });
                     globalFeedbackTags = userRows.filter(function(t){
                         return !!(t.button_label && String(t.button_label).trim());
                     }).map(function(t){
                         return {
-                            buttonLabel: t.button_label,
-                            feedbackText: t.feedback_text,
-                            sectionIndex: t.section_index,
-                            itemIndex: t.item_index,
-                            optionIndex: t.option_index,
-                            rubricId: t.rubric_id
+                            id: t.id || t.ID,
+                            buttonLabel: t.button_label || t.buttonLabel,
+                            feedbackText: t.feedback_text || t.feedbackText,
+                            sectionIndex: Number(t.section_index !== undefined ? t.section_index : t.sectionIndex),
+                            itemIndex: Number(t.item_index !== undefined ? t.item_index : t.itemIndex),
+                            optionIndex: Number(t.option_index !== undefined ? t.option_index : t.optionIndex),
+                            rubricId: t.rubric_id || t.rubricId
                         };
                     });
 
@@ -3988,11 +4032,12 @@
                         return !(t.button_label && String(t.button_label).trim());
                     }).map(function(t){
                         return {
-                            feedbackText: t.feedback_text,
-                            sectionIndex: t.section_index,
-                            itemIndex: t.item_index,
-                            optionIndex: t.option_index,
-                            rubricId: t.rubric_id
+                            id: t.id || t.ID,
+                            feedbackText: t.feedback_text || t.feedbackText,
+                            sectionIndex: Number(t.section_index !== undefined ? t.section_index : t.sectionIndex),
+                            itemIndex: Number(t.item_index !== undefined ? t.item_index : t.itemIndex),
+                            optionIndex: Number(t.option_index !== undefined ? t.option_index : t.optionIndex),
+                            rubricId: t.rubric_id || t.rubricId
                         };
                     });
                     globalFeedbackGeneral = generalTemplates;
@@ -4052,18 +4097,19 @@
                             var currentTargetEmail = String(targetQaEmail || '').trim().toLowerCase();
                             var userTemplates = data.feedbackTemplates.filter(function(t){
                                 var owner = (t.created_by || t.createdBy || '').trim().toLowerCase();
-                                return owner === currentTargetEmail;
+                                return !owner || isUserMatch(owner, currentTargetEmail);
                             });
                             globalFeedbackTags = userTemplates.filter(function(t){
                                 return !!(t.button_label && String(t.button_label).trim());
                             }).map(function(t){
                                 return {
-                                    buttonLabel: t.button_label,
-                                    feedbackText: t.feedback_text,
-                                    sectionIndex: t.section_index,
-                                    itemIndex: t.item_index,
-                                    optionIndex: t.option_index,
-                                    rubricId: t.rubric_id
+                                    id: t.id || t.ID,
+                                    buttonLabel: t.button_label || t.buttonLabel,
+                                    feedbackText: t.feedback_text || t.feedbackText,
+                                    sectionIndex: Number(t.section_index !== undefined ? t.section_index : t.sectionIndex),
+                                    itemIndex: Number(t.item_index !== undefined ? t.item_index : t.itemIndex),
+                                    optionIndex: Number(t.option_index !== undefined ? t.option_index : t.optionIndex),
+                                    rubricId: t.rubric_id || t.rubricId
                                 };
                             });
 
@@ -4071,11 +4117,12 @@
                                 return !(t.button_label && String(t.button_label).trim());
                             }).map(function(t){
                                 return {
-                                    feedbackText: t.feedback_text,
-                                    sectionIndex: t.section_index,
-                                    itemIndex: t.item_index,
-                                    optionIndex: t.option_index,
-                                    rubricId: t.rubric_id
+                                    id: t.id || t.ID,
+                                    feedbackText: t.feedback_text || t.feedbackText,
+                                    sectionIndex: Number(t.section_index !== undefined ? t.section_index : t.sectionIndex),
+                                    itemIndex: Number(t.item_index !== undefined ? t.item_index : t.itemIndex),
+                                    optionIndex: Number(t.option_index !== undefined ? t.option_index : t.optionIndex),
+                                    rubricId: t.rubric_id || t.rubricId
                                 };
                             });
                             globalFeedbackGeneral = generalTemplates;

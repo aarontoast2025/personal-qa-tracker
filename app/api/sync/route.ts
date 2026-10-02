@@ -237,10 +237,14 @@ export async function POST(request: Request) {
       console.warn("RubricDescriptions tab sync warning:", e.message);
     }
 
-    // 3. Sync Feedback Templates
-    if (webAppInitData?.feedbackChips && Array.isArray(webAppInitData.feedbackChips) && webAppInitData.feedbackChips.length > 0) {
+    // 3. Sync Feedback Templates (Combine both Quick Feedback Chips and General Per-Answer Feedback)
+    const allWebTemplates = [
+      ...(Array.isArray(webAppInitData?.feedbackChips) ? webAppInitData.feedbackChips : []),
+      ...(Array.isArray(webAppInitData?.feedbackGeneral) ? webAppInitData.feedbackGeneral : []),
+    ];
+    if (allWebTemplates.length > 0) {
       try {
-        results.feedbackTemplates = await syncFeedbackTemplates(supabase, webAppInitData.feedbackChips);
+        results.feedbackTemplates = await syncFeedbackTemplates(supabase, allWebTemplates);
       } catch (e: any) {
         console.warn("Web App FeedbackTemplates sync warning:", e.message);
       }

@@ -257,7 +257,7 @@ export async function syncRubrics(
 
   const { error } = await supabase
     .from("rubrics")
-    .upsert(records, { onConflict: "id", ignoreDuplicates: true });
+    .upsert(records, { onConflict: "id", ignoreDuplicates: false });
 
   if (error) {
     console.error("Error syncing rubrics:", error);
@@ -284,9 +284,9 @@ export async function syncRubricDescriptions(
       return {
         id: String(r.ID || r.id).trim(),
         rubric_id: String(r["Rubric ID"] || r.rubric_id).trim(),
-        section_index: parseInt(r["Section Index"] ?? r.section_index) || 0,
-        item_index: parseInt(r["Item Index"] ?? r.item_index) || 0,
-        option_index: parseInt(r["Option Index"] ?? r.option_index) || 0,
+        section_index: parseInt(String(r["Section Index"] ?? r.section_index ?? 0), 10) || 0,
+        item_index: parseInt(String(r["Item Index"] ?? r.item_index ?? 0), 10) || 0,
+        option_index: parseInt(String(r["Option Index"] ?? r.option_index ?? 0), 10) || 0,
         description: parsedDesc || [],
         synced_at: new Date().toISOString(),
       };
@@ -294,7 +294,7 @@ export async function syncRubricDescriptions(
 
   const { error } = await supabase
     .from("rubric_descriptions")
-    .upsert(records, { onConflict: "id", ignoreDuplicates: true });
+    .upsert(records, { onConflict: "id", ignoreDuplicates: false });
 
   if (error) {
     console.error("Error syncing rubric descriptions:", error);
@@ -316,9 +316,9 @@ export async function syncFeedbackTemplates(
       id: String(r.ID || r.id).trim(),
       created_by: r["Created By"] || r.created_by || r.createdBy || null,
       rubric_id: r["Rubric ID"] || r.rubric_id || r.rubricId || null,
-      section_index: parseInt(r["Section Index"] ?? r.section_index ?? r.sectionIndex) || 0,
-      item_index: parseInt(r["Item Index"] ?? r.item_index ?? r.itemIndex) || 0,
-      option_index: parseInt(r["Option Index"] ?? r.option_index ?? r.optionIndex) || 0,
+      section_index: parseInt(String(r["Section Index"] ?? r.section_index ?? r.sectionIndex ?? 0), 10) || 0,
+      item_index: parseInt(String(r["Item Index"] ?? r.item_index ?? r.itemIndex ?? 0), 10) || 0,
+      option_index: parseInt(String(r["Option Index"] ?? r.option_index ?? r.optionIndex ?? 0), 10) || 0,
       button_label: (r["Button Label"] || r.button_label || r.buttonLabel || "").trim() || null,
       feedback_text: String(r["Feedback Text"] || r.feedback_text || r.feedbackText).trim(),
       created_at: r["Created At"] || r.created_at || new Date().toISOString(),
@@ -328,7 +328,7 @@ export async function syncFeedbackTemplates(
 
   const { error } = await supabase
     .from("feedback_templates")
-    .upsert(records, { onConflict: "id", ignoreDuplicates: true });
+    .upsert(records, { onConflict: "id", ignoreDuplicates: false });
 
   if (error) {
     console.error("Error syncing feedback templates:", error);
