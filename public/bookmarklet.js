@@ -336,7 +336,7 @@
             return res.json().catch(function(){ return []; });
         });
     };
-    var DEFAULT_QA_EMAIL = 'aaron.toast2025@gmail.com';
+    var DEFAULT_QA_EMAIL = '';
     var passedEmail = (scriptParams.email || '').trim();
     var QA_EMAIL = passedEmail || storage.get('qa_email', DEFAULT_QA_EMAIL);
     if (passedEmail) {
@@ -364,15 +364,8 @@
     };
 
     var isUserMatch = function(owner, targetEmail) {
-        if (!owner) return true;
-        if (!targetEmail) return true;
-        var o = String(owner).trim().toLowerCase();
-        var t = String(targetEmail).trim().toLowerCase();
-        if (o === t) return true;
-        var oPrefix = o.split('@')[0].replace('toast2025', 'arela');
-        var tPrefix = t.split('@')[0].replace('toast2025', 'arela');
-        if (oPrefix === tPrefix) return true;
-        return false;
+        if (!owner || !targetEmail) return false;
+        return String(owner).trim().toLowerCase() === String(targetEmail).trim().toLowerCase();
     };
     var globalRubricDescriptions = [];
     var globalUsers = [];
@@ -3545,8 +3538,8 @@
         grpEmail.appendChild(lblEmail);
 
         var inpEmail = createElement("input", sInput);
-        inpEmail.placeholder = DEFAULT_QA_EMAIL;
-        inpEmail.value = QA_EMAIL || storage.get('qa_email', DEFAULT_QA_EMAIL);
+        inpEmail.placeholder = "your.email@toasttab.com";
+        inpEmail.value = QA_EMAIL || storage.get('qa_email', '');
         var wrapEmail = createIconFieldWrapper("👤", inpEmail, true);
         grpEmail.appendChild(wrapEmail);
         pBody.appendChild(grpEmail);
@@ -3871,7 +3864,7 @@
                 storage.set('qa_name', currentQaDisplayName);
             }
 
-            var newEmail = inpEmail.value.trim() || DEFAULT_QA_EMAIL;
+            var newEmail = inpEmail.value.trim();
             QA_EMAIL = newEmail;
             storage.set('qa_email', QA_EMAIL);
 
@@ -3929,10 +3922,18 @@
     var loadAssignmentsFromSupabase = function() {
         var sKey = SUPABASE_KEY || storage.get('supabase_key', DEFAULT_SUPABASE_KEY);
         if (!sKey) return Promise.resolve(false);
-        return supabaseFetch('assignments?order=date.desc', 'GET')
+        var targetQaEmail = (QA_EMAIL || storage.get('qa_email', '')).trim().toLowerCase();
+        var endpoint = 'assignments?order=date.desc';
+        if (targetQaEmail) {
+            endpoint += '&qa_email=ilike.' + encodeURIComponent(targetQaEmail);
+        }
+        return supabaseFetch(endpoint, 'GET')
             .then(function(rows) {
                 if (Array.isArray(rows) && rows.length > 0) {
-                    globalAssignments = rows.map(function(r) {
+                    var filteredRows = targetQaEmail
+                        ? rows.filter(function(r) { return (r.qa_email || '').trim().toLowerCase() === targetQaEmail; })
+                        : rows;
+                    globalAssignments = filteredRows.map(function(r) {
                         return {
                             id: r.id,
                             date: normalizeDateStr(r.date),
@@ -3997,22 +3998,15 @@
     var loadTemplatesFromSupabase = function() {
         var sKey = SUPABASE_KEY || storage.get('supabase_key', DEFAULT_SUPABASE_KEY);
         if (!sKey) return Promise.resolve(false);
-        var targetQaEmail = (QA_EMAIL || storage.get('qa_email', DEFAULT_QA_EMAIL)).trim().toLowerCase();
-        var emailVariants = [
-            targetQaEmail,
-            targetQaEmail.indexOf('toasttab.com') !== -1 ? targetQaEmail.replace('@toasttab.com', '@gmail.com') : null,
-            (targetQaEmail.indexOf('toasttab.com') !== -1 && targetQaEmail.indexOf('aaron.') === 0) ? 'aaron.toast2025@gmail.com' : null,
-            targetQaEmail.indexOf('gmail.com') !== -1 ? targetQaEmail.replace('@gmail.com', '@toasttab.com') : null,
-            (targetQaEmail.indexOf('gmail.com') !== -1 && (targetQaEmail.indexOf('toast2025') !== -1 || targetQaEmail.indexOf('aaron.') === 0)) ? 'aaron.arela@toasttab.com' : null
-        ].filter(Boolean);
-        var orFilter = emailVariants.map(function(e){ return 'created_by.ilike.' + encodeURIComponent(e); }).join(',');
-        var endpoint = 'feedback_templates?select=*&or=(' + orFilter + ')';
+        var targetQaEmail = (QA_EMAIL || storage.get('qa_email', '')).trim().toLowerCase();
+        if (!targetQaEmail) return Promise.resolve(false);
+        var endpoint = 'feedback_templates?select=*&created_by=ilike.' + encodeURIComponent(targetQaEmail);
         return supabaseFetch(endpoint, 'GET')
             .then(function(rows) {
                 if (Array.isArray(rows)) {
                     var userRows = rows.filter(function(t){
                         var owner = (t.created_by || t.createdBy || '').trim().toLowerCase();
-                        return !owner || isUserMatch(owner, targetQaEmail);
+                        return isUserMatch(owner, targetQaEmail);
                     });
                     globalFeedbackTags = userRows.filter(function(t){
                         return !!(t.button_label && String(t.button_label).trim());
@@ -4056,7 +4050,7 @@
     var checkAndSyncData = function(forceRefresh) {
         showLoading("Loading Toast QA Data...");
 
-        var targetQaEmail = QA_EMAIL || storage.get('qa_email', DEFAULT_QA_EMAIL);
+        var targetQaEmail = QA_EMAIL || storage.get('qa_email', '');
         var trackerApiUrl = API_BASE_URL || DEFAULT_API_URL;
 
         // Try Next.js Tracker API init first for high-speed bundled data
@@ -4097,7 +4091,7 @@
                             var currentTargetEmail = String(targetQaEmail || '').trim().toLowerCase();
                             var userTemplates = data.feedbackTemplates.filter(function(t){
                                 var owner = (t.created_by || t.createdBy || '').trim().toLowerCase();
-                                return !owner || isUserMatch(owner, currentTargetEmail);
+                                return isUserMatch(owner, currentTargetEmail);
                             });
                             globalFeedbackTags = userTemplates.filter(function(t){
                                 return !!(t.button_label && String(t.button_label).trim());
@@ -4144,7 +4138,8 @@
                             feedbackGeneral: globalFeedbackGeneral,
                             evalTypes: globalEvalTypes,
                             qaName: currentQaDisplayName,
-                            qaFirstName: qaFirstName
+                            qaFirstName: qaFirstName,
+                            qaEmail: targetQaEmail
                         });
 
                         refreshFeedbackTagsAndGeneral();
@@ -4171,7 +4166,11 @@
     var runDirectFallbackSync = function(forceRefresh) {
         // 1. Bulk restore from IndexedDB immediately (instant 0ms startup!)
         idb.get('cached_payload').then(function(cached){
-            if (cached && !forceRefresh) {
+            var currentTargetEmail = String(targetQaEmail || '').trim().toLowerCase();
+            var cachedEmail = String(cached && cached.qaEmail || '').trim().toLowerCase();
+            var isCacheValidForUser = !cachedEmail || !currentTargetEmail || cachedEmail === currentTargetEmail;
+
+            if (cached && !forceRefresh && isCacheValidForUser) {
                 allRubrics = (cached.rubrics && cached.rubrics.length > 0) ? cached.rubrics : [DEFAULT_FALLBACK_RUBRIC];
                 if (cached.assignments && cached.assignments.length > 0) {
                     globalAssignments = cached.assignments;

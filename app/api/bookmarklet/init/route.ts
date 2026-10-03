@@ -17,25 +17,25 @@ export async function OPTIONS() {
 export async function GET(request: Request) {
   try {
     const { searchParams } = new URL(request.url);
-    const qaEmail = (searchParams.get("qa_email") || "aaron.toast2025@gmail.com").trim().toLowerCase();
+    const qaEmail = (searchParams.get("qa_email") || "").trim().toLowerCase();
 
     const supabase = await createClient();
 
-    // Build email variants to match corporate Toast and personal email aliases
-    const emailVariants = Array.from(
-      new Set(
-        [
-          qaEmail,
-          qaEmail.includes("toasttab.com") ? qaEmail.replace("@toasttab.com", "@gmail.com") : null,
-          qaEmail.includes("toasttab.com") && qaEmail.startsWith("aaron.") ? "aaron.toast2025@gmail.com" : null,
-          qaEmail.includes("gmail.com") ? qaEmail.replace("@gmail.com", "@toasttab.com") : null,
-          qaEmail.includes("gmail.com") && (qaEmail.includes("toast2025") || qaEmail.startsWith("aaron.")) ? "aaron.arela@toasttab.com" : null,
-        ].filter(Boolean) as string[]
-      )
-    );
+    // Query assignments and templates strictly for this specific QA email (no hardcoded aliases)
+    const assignmentsPromise = qaEmail
+      ? supabase
+          .from("assignments")
+          .select("*")
+          .ilike("qa_email", qaEmail)
+          .order("date", { ascending: false })
+      : Promise.resolve({ data: [] as any[], error: null });
 
-    const emailOrFilter = emailVariants.map((e) => `qa_email.ilike.${e}`).join(",");
-    const createdByOrFilter = emailVariants.map((e) => `created_by.ilike.${e}`).join(",");
+    const templatesPromise = qaEmail
+      ? supabase
+          .from("feedback_templates")
+          .select("*")
+          .ilike("created_by", qaEmail)
+      : Promise.resolve({ data: [] as any[], error: null });
 
     // Fetch user settings, assignments, rubrics, and templates concurrently
     const [
@@ -46,17 +46,10 @@ export async function GET(request: Request) {
       { data: templates, error: tmplErr },
     ] = await Promise.all([
       supabase.from("app_settings").select("gemini_api_key, gemini_model, google_web_app_url").limit(1).maybeSingle(),
-      supabase
-        .from("assignments")
-        .select("*")
-        .or(emailOrFilter)
-        .order("date", { ascending: false }),
+      assignmentsPromise,
       supabase.from("rubrics").select("*"),
       supabase.from("rubric_descriptions").select("*"),
-      supabase
-        .from("feedback_templates")
-        .select("*")
-        .or(createdByOrFilter),
+      templatesPromise,
     ]);
 
     if (asgErr) console.warn("Bookmarklet init assignments warning:", asgErr.message);
