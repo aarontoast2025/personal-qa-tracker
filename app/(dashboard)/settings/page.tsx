@@ -57,7 +57,7 @@ export default async function SettingsPage() {
       <SettingsForm
         initialSheetId={settings?.google_sheet_id || ""}
         initialWebAppUrl={(settings as any)?.google_web_app_url || DEFAULT_WEB_APP_URL}
-        initialGeminiKey={settings?.gemini_api_key || ""}
+        hasServerGeminiKey={Boolean(process.env.GEMINI_API_KEY)}
         userEmail={userEmail}
         userName={userName}
         initialCounts={{

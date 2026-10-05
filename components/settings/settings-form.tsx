@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useRef, useEffect } from "react";
-import { saveGoogleSheetId, saveGeminiApiKey } from "@/app/(dashboard)/settings/actions";
+import { saveGoogleSheetId } from "@/app/(dashboard)/settings/actions";
 import {
   Activity,
   CheckCircle2,
@@ -9,8 +9,6 @@ import {
   Save,
   ShieldAlert,
   Sparkles,
-  Eye,
-  EyeOff,
   Bookmark,
   Copy,
   Check,
@@ -31,7 +29,7 @@ import {
 interface SettingsFormProps {
   initialSheetId: string;
   initialWebAppUrl?: string;
-  initialGeminiKey?: string;
+  hasServerGeminiKey?: boolean;
   userEmail?: string;
   userName?: string;
   initialCounts?: {
@@ -47,7 +45,7 @@ interface SettingsFormProps {
 export function SettingsForm({
   initialSheetId,
   initialWebAppUrl = DEFAULT_WEB_APP_URL,
-  initialGeminiKey = "",
+  hasServerGeminiKey = false,
   userEmail = "",
   userName = "",
   initialCounts,
@@ -60,7 +58,6 @@ export function SettingsForm({
     message: string;
     latencyMs?: number;
   } | null>(null);
-  const [geminiKey, setGeminiKey] = useState(initialGeminiKey);
   const [origin, setOrigin] = useState("https://personal-qa-tracker.vercel.app");
   const [counts, setCounts] = useState(
     initialCounts || {
@@ -72,9 +69,7 @@ export function SettingsForm({
       agents: 0,
     }
   );
-  const [showKey, setShowKey] = useState(false);
   const [isSavingSheet, setIsSavingSheet] = useState(false);
-  const [isSavingGemini, setIsSavingGemini] = useState(false);
   const [isSyncingTemplates, setIsSyncingTemplates] = useState(false);
   const [isSyncingAll, setIsSyncingAll] = useState(false);
   const [copiedCode, setCopiedCode] = useState(false);
@@ -169,25 +164,7 @@ export function SettingsForm({
     }
   }
 
-  async function handleSaveGemini(e: React.FormEvent<HTMLFormElement>) {
-    e.preventDefault();
-    setIsSavingGemini(true);
-    setMessage(null);
 
-    const formData = new FormData(e.currentTarget);
-    const res = await saveGeminiApiKey(formData);
-
-    setIsSavingGemini(false);
-    if (res.error) {
-      setMessage({ type: "error", text: res.error });
-    } else {
-      setMessage({
-        type: "success",
-        text: "Gemini API Key saved successfully!",
-      });
-      if (res.geminiApiKey !== undefined) setGeminiKey(res.geminiApiKey);
-    }
-  }
 
   function copyBookmarkletCode() {
     navigator.clipboard.writeText(bookmarkletCode);
@@ -502,70 +479,33 @@ export function SettingsForm({
               Gemini AI Integration
             </h2>
             <p className="text-xs text-slate-500 dark:text-slate-400">
-              Configure your Google Gemini API key for automated interaction summaries and rubric coaching.
+              Automated interaction summaries and rubric coaching powered by Google Gemini.
             </p>
           </div>
         </div>
 
-        <form onSubmit={handleSaveGemini} className="space-y-4">
-          <div>
-            <label
-              htmlFor="gemini_api_key"
-              className="block text-xs font-medium text-slate-700 dark:text-slate-300 mb-1.5"
-            >
-              Google Gemini API Key
-            </label>
-            <div className="relative">
-              <input
-                id="gemini_api_key"
-                name="gemini_api_key"
-                type={showKey ? "text" : "password"}
-                value={geminiKey}
-                onChange={(e) => setGeminiKey(e.target.value)}
-                placeholder="AIzaSy..."
-                className="w-full pl-3.5 pr-10 py-2.5 text-xs font-mono rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 text-slate-900 dark:text-white placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500"
-              />
-              <button
-                type="button"
-                onClick={() => setShowKey(!showKey)}
-                className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600 dark:hover:text-slate-200"
-              >
-                {showKey ? (
-                  <EyeOff className="w-4 h-4" />
-                ) : (
-                  <Eye className="w-4 h-4" />
-                )}
-              </button>
-            </div>
-            <p className="text-[11px] text-slate-400 dark:text-slate-500 mt-1.5">
-              The Bookmarklet will automatically use this key. You can choose the specific model (e.g. gemini-2.5-flash, gemini-2.5-pro, etc.) directly in the Bookmarklet.
-            </p>
+        <div className="rounded-xl border border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-slate-800/50 p-4 space-y-3">
+          <div className="flex items-center justify-between">
+            <span className="text-xs font-medium text-slate-700 dark:text-slate-300">
+              API Key Configuration
+            </span>
+            {hasServerGeminiKey ? (
+              <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[11px] font-semibold bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border border-emerald-500/20">
+                <CheckCircle2 className="w-3.5 h-3.5" />
+                Active via Vercel Environment
+              </span>
+            ) : (
+              <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[11px] font-semibold bg-amber-500/10 text-amber-600 dark:text-amber-400 border border-amber-500/20">
+                <ShieldAlert className="w-3.5 h-3.5" />
+                Configured via Vercel Environment Variables
+              </span>
+            )}
           </div>
 
-          <div className="flex items-center justify-between pt-2">
-            <div className="text-xs text-slate-500">
-              Status:{" "}
-              {geminiKey ? (
-                <span className="font-semibold text-emerald-600 dark:text-emerald-400">
-                  Configured
-                </span>
-              ) : (
-                <span className="font-semibold text-amber-600 dark:text-amber-400">
-                  Key Not Set
-                </span>
-              )}
-            </div>
-
-            <button
-              type="submit"
-              disabled={isSavingGemini}
-              className="inline-flex items-center gap-2 px-4 py-2 rounded-xl bg-indigo-600 hover:bg-indigo-700 active:bg-indigo-800 text-white font-semibold text-xs transition-colors disabled:opacity-50"
-            >
-              <Save className="w-3.5 h-3.5" />
-              {isSavingGemini ? "Saving..." : "Save Gemini Key"}
-            </button>
-          </div>
-        </form>
+          <p className="text-[11px] text-slate-500 dark:text-slate-400 leading-relaxed">
+            The Gemini API key is securely stored on the server using Vercel Environment Variables (<code className="font-mono text-indigo-600 dark:text-indigo-400">GEMINI_API_KEY</code>). The Bookmarklet routes all AI generation through the secure Next.js proxy, eliminating the need to save or distribute raw API keys.
+          </p>
+        </div>
       </div>
 
       {/* Bookmarklet Installation Card */}

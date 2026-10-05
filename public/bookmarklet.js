@@ -342,7 +342,7 @@
     if (passedEmail) {
         storage.set('qa_email', QA_EMAIL);
     }
-    var GEMINI_API_KEY = storage.get('gemini_key', '');
+    try { localStorage.removeItem('toast_qa_gemini_key'); } catch(e){}
     var GEMINI_MODEL = storage.get('gemini_model', DEFAULT_GEMINI_MODEL);
 
     var state = {};
@@ -411,7 +411,6 @@
         var sKey = SUPABASE_KEY || storage.get('supabase_key', DEFAULT_SUPABASE_KEY);
         if (sKey) {
             return supabaseFetch('app_settings', 'POST', {
-                gemini_api_key: GEMINI_API_KEY,
                 gemini_model: GEMINI_MODEL,
                 updated_at: new Date().toISOString()
             }).catch(function(){});
@@ -549,40 +548,23 @@
         }
     };
 
-    // --- Direct Gemini API Client ---
+    // --- Secure Gemini AI Client (via Next.js Proxy) ---
     var callGemini = function(prompt, systemInstruction, isJson) {
-        if (!GEMINI_API_KEY) {
-            showToast("Gemini API Key missing! Set it in ⚙️ Settings", true);
-            showSettingsModal();
-            return Promise.reject(new Error("Missing Gemini API Key"));
-        }
+        var trackerApiUrl = API_BASE_URL || DEFAULT_API_URL;
+        var endpoint = trackerApiUrl.replace(/\/+$/, '') + '/gemini';
 
-        var url = "https://generativelanguage.googleapis.com/v1beta/models/" + (GEMINI_MODEL || DEFAULT_GEMINI_MODEL) + ":generateContent?key=" + GEMINI_API_KEY;
-        var contents = [{ role: "user", parts: [{ text: prompt }] }];
-        var payload = { contents: contents };
-        if (systemInstruction) payload.systemInstruction = { parts: [{ text: systemInstruction }] };
-        if (isJson) {
-            payload.generationConfig = { responseMimeType: "application/json" };
-        }
-
-        return fetch(url, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify(payload)
-        })
-        .then(function(res) {
-            if (!res.ok) {
-                return res.json().then(function(err) {
-                    throw new Error((err.error && err.error.message) || ("Gemini API error (" + res.status + ")"));
-                });
+        return apiPost(endpoint, {
+            prompt: prompt,
+            systemInstruction: systemInstruction,
+            isJson: isJson,
+            model: GEMINI_MODEL || DEFAULT_GEMINI_MODEL
+        }).then(function(res) {
+            if (!res || !res.success) {
+                var errMsg = (res && res.error) || "Gemini AI generation failed";
+                showToast(errMsg, true);
+                throw new Error(errMsg);
             }
-            return res.json();
-        })
-        .then(function(data) {
-            if (data.candidates && data.candidates[0] && data.candidates[0].content && data.candidates[0].content.parts) {
-                return data.candidates[0].content.parts.map(function(p){ return p.text; }).join("").trim();
-            }
-            throw new Error("No response from Gemini");
+            return res.text || "";
         });
     };
 
@@ -3544,75 +3526,6 @@
         grpEmail.appendChild(wrapEmail);
         pBody.appendChild(grpEmail);
 
-        // 3. Gemini API Key (with 🔑 in-field icon and ✏️ unlock/edit button)
-        var grpKey = createElement("div");
-        var lblKey = createElement("label", sLabel);
-        lblKey.textContent = "Your Gemini API Key (from Google AI Studio)";
-        grpKey.appendChild(lblKey);
-
-        var initialKey = GEMINI_API_KEY || storage.get('gemini_key', '');
-
-        var inpKey = createElement("input", sInput);
-        inpKey.placeholder = "Paste your AIzaSy... key";
-        inpKey.value = initialKey;
-        inpKey.type = initialKey ? "password" : "text";
-
-        var wrapKey = createElement("div", "position:relative;display:flex;align-items:center;width:100%;margin:0;");
-        var iconKey = createElement("span", "position:absolute;left:11px;pointer-events:none;font-size:13px;z-index:2;user-select:none;display:inline-flex;align-items:center;justify-content:center;");
-        iconKey.textContent = "🔑";
-
-        inpKey.style.paddingLeft = "36px";
-        inpKey.style.paddingRight = "36px";
-        inpKey.style.boxSizing = "border-box";
-        inpKey.style.width = "100%";
-        inpKey.style.height = "36px";
-        inpKey.style.margin = "0";
-
-        var btnEditKey = createElement("span", "position:absolute;right:10px;cursor:pointer;font-size:14px;user-select:none;z-index:3;opacity:0.75;padding:2px;display:none;");
-        btnEditKey.textContent = "✏️";
-        btnEditKey.title = "Click to edit/update API key";
-
-        // Shared helper: update the key field UI for a given key value
-        var applyKeyToUI = function(keyVal) {
-            inpKey.value = keyVal;
-            if (keyVal) {
-                inpKey.readOnly = true;
-                inpKey.type = "password";
-                inpKey.style.background = "#f8fafc";
-                btnEditKey.style.display = "inline-flex";
-                btnEditKey.textContent = "✏️";
-                btnEditKey.title = "Click to edit/update API key";
-            } else {
-                inpKey.readOnly = false;
-                inpKey.type = "text";
-                inpKey.style.background = "#ffffff";
-                btnEditKey.style.display = "none";
-            }
-        };
-
-        addListener(btnEditKey, "mouseenter", function(){ btnEditKey.style.opacity = "1"; });
-        addListener(btnEditKey, "mouseleave", function(){ btnEditKey.style.opacity = "0.75"; });
-        addListener(btnEditKey, "click", function(){
-            inpKey.readOnly = false;
-            inpKey.style.background = "#ffffff";
-            inpKey.type = "text";
-            btnEditKey.textContent = "🔓";
-            btnEditKey.title = "Unlocked for editing";
-            inpKey.focus();
-        });
-
-        // Apply initial state
-        applyKeyToUI(initialKey);
-
-        wrapKey.appendChild(iconKey);
-        wrapKey.appendChild(inpKey);
-        wrapKey.appendChild(btnEditKey);
-        grpKey.appendChild(wrapKey);
-
-        var keyHelp = createElement("div", "font-size:11px;color:#94a3b8;margin-top:3px;");
-        keyHelp.textContent = "Synced with Personal QA Tracker Settings & local browser storage.";
-        grpKey.appendChild(keyHelp);
-        pBody.appendChild(grpKey);
 
         // 3. Dynamic Gemini Model Combobox (with manual typing, Enter-to-save, and delete per option)
         var grpModel = createElement("div", "position:relative;");
@@ -3871,7 +3784,6 @@
             if (!newName) {
                 qaFirstName = formatEmailToName(newEmail).split(' ')[0];
             }
-            GEMINI_API_KEY = inpKey.value.trim();
 
             var chosenModel = inpModel.value.trim() || DEFAULT_GEMINI_MODEL;
             GEMINI_MODEL = chosenModel;
@@ -3882,7 +3794,6 @@
             var newInstr = txtSettingsAiInstr.value.trim() || DEFAULT_GENERAL_INSTRUCTION;
             aiInstructions.general = newInstr;
 
-            storage.set('gemini_key', GEMINI_API_KEY);
             storage.set('gemini_model', GEMINI_MODEL);
             storage.set('gemini_models', JSON.stringify(globalGeminiModels));
             storage.set('ai_gen_instr', newInstr);
@@ -3893,7 +3804,6 @@
             var supKey = SUPABASE_KEY || storage.get('supabase_key', DEFAULT_SUPABASE_KEY);
             var savePromise = supKey
                 ? supabaseFetch('app_settings', 'POST', {
-                    gemini_api_key: GEMINI_API_KEY,
                     gemini_model: GEMINI_MODEL,
                     updated_at: new Date().toISOString()
                 }).catch(function(e){ console.warn("app_settings sync:", e); })
@@ -3980,10 +3890,6 @@
             .then(function(rows) {
                 if (Array.isArray(rows) && rows.length > 0) {
                     var val = rows[0];
-                    if (val.gemini_api_key && !GEMINI_API_KEY) {
-                        GEMINI_API_KEY = val.gemini_api_key;
-                        storage.set('gemini_key', val.gemini_api_key);
-                    }
                     if (val.gemini_model && !storage.get('gemini_model', '')) {
                         GEMINI_MODEL = val.gemini_model;
                         storage.set('gemini_model', val.gemini_model);
@@ -4068,10 +3974,7 @@
                             QA_EMAIL = data.qa_email;
                             storage.set('qa_email', data.qa_email);
                         }
-                        if (data.geminiApiKey && !storage.get('gemini_key', '')) {
-                            GEMINI_API_KEY = data.geminiApiKey;
-                            storage.set('gemini_key', data.geminiApiKey);
-                        }
+
                         if (data.geminiModel && !storage.get('gemini_model', '')) {
                             GEMINI_MODEL = data.geminiModel;
                             storage.set('gemini_model', data.geminiModel);
