@@ -148,7 +148,7 @@ export async function syncAssignments(
 
   if (derivedEvals.length > 0) {
     const { error: evalUpsertErr } = await supabase.from("evaluations").upsert(derivedEvals, {
-      onConflict: "interaction_id",
+      onConflict: "id",
       ignoreDuplicates: false,
     });
     if (evalUpsertErr) {

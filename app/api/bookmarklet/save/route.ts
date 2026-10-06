@@ -29,9 +29,33 @@ export async function POST(request: Request) {
 
     const supabase = await createClient();
 
-    const evalId = evalData.id || `EVL-${Date.now()}-${Math.floor(Math.random() * 1000)}`;
-    const nowIso = new Date().toISOString();
     const assignmentId = evalData.assignmentId || evalData.assignment_id || null;
+    let evalId = evalData.id || evalData.evalId;
+    if (!evalId && assignmentId) {
+      const { data: existingAsgEval } = await supabase
+        .from("evaluations")
+        .select("id")
+        .eq("assignment_id", assignmentId)
+        .maybeSingle();
+      if (existingAsgEval?.id) {
+        evalId = existingAsgEval.id;
+      }
+    }
+    if (!evalId) {
+      const { data: existingIntEval } = await supabase
+        .from("evaluations")
+        .select("id")
+        .eq("interaction_id", interactionId)
+        .maybeSingle();
+      if (existingIntEval?.id) {
+        evalId = existingIntEval.id;
+      }
+    }
+    if (!evalId) {
+      evalId = `EVL-${Date.now()}-${Math.floor(Math.random() * 1000)}`;
+    }
+
+    const nowIso = new Date().toISOString();
 
     let agentSnapshot = evalData.agentSnapshot || evalData.agent_snapshot || null;
     if (typeof agentSnapshot === "string") {
@@ -76,15 +100,22 @@ export async function POST(request: Request) {
       synced_at: nowIso,
     };
 
-    // 1. Upsert evaluation into Supabase (onConflict on interaction_id or id)
+    // 1. Upsert evaluation into Supabase by primary key 'id'
     const { error: evalError } = await supabase
       .from("evaluations")
-      .upsert(evaluationRecord, { onConflict: "interaction_id" });
+      .upsert(evaluationRecord, { onConflict: "id" });
 
     if (evalError) {
       console.error("Error saving evaluation:", evalError);
+      const isDuplicate =
+        evalError.message.includes("evaluations_interaction_id_key") ||
+        evalError.message.includes("duplicate key") ||
+        evalError.code === "23505";
+      const errorMsg = isDuplicate
+        ? "Interaction ID already exists."
+        : evalError.message;
       return NextResponse.json(
-        { success: false, error: evalError.message },
+        { success: false, error: errorMsg },
         { status: 500, headers: corsHeaders }
       );
     }

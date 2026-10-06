@@ -187,7 +187,7 @@ export function AssignmentsView({ userEmail, initialWebAppUrl }: AssignmentsView
                         sync_status: "synced",
                         synced_at: new Date().toISOString(),
                       },
-                      { onConflict: "interaction_id" }
+                      { onConflict: "id" }
                     );
                   }
                 } catch (gasErr) {
@@ -271,7 +271,7 @@ export function AssignmentsView({ userEmail, initialWebAppUrl }: AssignmentsView
       if (existingSupabase && existingSupabase.assignment_id !== asg.id) {
         setRowErrors((prev) => ({
           ...prev,
-          [asg.id]: `Interaction ID "${trimmed}" has already been evaluated or claimed!`,
+          [asg.id]: "Interaction ID already exists.",
         }));
         return;
       }
@@ -294,7 +294,7 @@ export function AssignmentsView({ userEmail, initialWebAppUrl }: AssignmentsView
             if (existingAsg && existingAsg !== asg.id) {
               setRowErrors((prev) => ({
                 ...prev,
-                [asg.id]: `Interaction ID "${trimmed}" already claimed in Google Sheet!`,
+                [asg.id]: "Interaction ID already exists.",
               }));
               return;
             }
@@ -306,7 +306,23 @@ export function AssignmentsView({ userEmail, initialWebAppUrl }: AssignmentsView
 
       // 3. Unique! Upsert Partial evaluation in Supabase
       const nowIso = new Date().toISOString();
-      const evalId = evalMap[asg.id]?.id || `EVL-${Date.now()}-${Math.floor(Math.random() * 1000)}`;
+      let evalId =
+        evalMap[asg.id]?.id ||
+        (existingSupabase?.assignment_id === asg.id ? existingSupabase.id : undefined);
+      if (!evalId) {
+        const { data: existingForAsg } = await supabase
+          .from("evaluations")
+          .select("id")
+          .eq("assignment_id", asg.id)
+          .maybeSingle();
+        if (existingForAsg?.id) {
+          evalId = existingForAsg.id;
+        }
+      }
+      if (!evalId) {
+        evalId = `EVL-${Date.now()}-${Math.floor(Math.random() * 1000)}`;
+      }
+
       const agentName =
         asg.agent_snapshot?.displayName ||
         asg.agent_snapshot?.fullName ||
@@ -331,9 +347,16 @@ export function AssignmentsView({ userEmail, initialWebAppUrl }: AssignmentsView
 
       const { error: evalErr } = await supabase
         .from("evaluations")
-        .upsert(evalRecord, { onConflict: "interaction_id" });
+        .upsert(evalRecord, { onConflict: "id" });
 
       if (evalErr) {
+        const isDuplicate =
+          evalErr.message.includes("evaluations_interaction_id_key") ||
+          evalErr.message.includes("duplicate key") ||
+          evalErr.code === "23505";
+        if (isDuplicate) {
+          throw new Error("Interaction ID already exists.");
+        }
         throw new Error(`Failed to save evaluation: ${evalErr.message}`);
       }
 
@@ -362,7 +385,7 @@ export function AssignmentsView({ userEmail, initialWebAppUrl }: AssignmentsView
               agentEmail: asg.agent_email,
               agentSnapshot: asg.agent_snapshot,
               evaluationType: asg.evaluation_type || "Manual Audit",
-              rubricId: asg.rubric_id,
+              rubric_id: asg.rubric_id,
               score: 0,
               status: "Partial",
               isPartial: true,
@@ -387,9 +410,16 @@ export function AssignmentsView({ userEmail, initialWebAppUrl }: AssignmentsView
       setTimeout(() => setSyncNotice(null), 4000);
     } catch (err: any) {
       console.error("Interaction submit error:", err);
+      const msg = err.message || "Failed to claim Interaction ID.";
+      const isDuplicate =
+        msg.includes("evaluations_interaction_id_key") ||
+        msg.includes("duplicate key") ||
+        msg.includes("Interaction ID already exists") ||
+        err?.code === "23505";
+      const cleanMsg = isDuplicate ? "Interaction ID already exists." : msg;
       setRowErrors((prev) => ({
         ...prev,
-        [asg.id]: err.message || "Failed to claim Interaction ID.",
+        [asg.id]: cleanMsg,
       }));
     } finally {
       setCheckingId(null);
