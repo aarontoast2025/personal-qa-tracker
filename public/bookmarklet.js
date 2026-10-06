@@ -2665,12 +2665,24 @@
 
             var compactSnap = null;
             if (agentSnap && typeof agentSnap === 'object') {
-                compactSnap = Object.assign({}, agentSnap, {
+                var ptEmail = agentSnap.toasttabEmail || agentSnap.email || selectedAgentEmail || '';
+                compactSnap = {
+                    eid: agentSnap.eid ? String(agentSnap.eid) : '',
+                    role: agentSnap.role || 'Agent',
+                    tier: agentSnap.tier || '',
+                    wave: agentSnap.wave || '',
+                    skill: agentSnap.skill || '',
+                    channel: agentSnap.channel || '',
+                    manager: agentSnap.manager || '',
                     fullName: agentSnap.fullName || agentSnap.displayName || resolvedAgentName || '',
+                    location: agentSnap.location || '',
+                    caseSafeId: agentSnap.caseSafeId || '',
+                    supervisor: agentSnap.supervisor || '',
                     displayName: agentSnap.displayName || resolvedAgentName || '',
-                    toasttabEmail: agentSnap.toasttabEmail || selectedAgentEmail || '',
-                    role: agentSnap.role || 'Agent'
-                });
+                    toasttabEmail: ptEmail,
+                    productionDate: agentSnap.productionDate || '',
+                    internalIbexEmail: agentSnap.internalIbexEmail || ''
+                };
             }
 
             var evalData = {
@@ -2796,18 +2808,24 @@
         var selectedAsg = selectedAssignmentId ? globalAssignments.find(function(a){ return a.id === selectedAssignmentId; }) : null;
         var agentSnap = selectedAsg && selectedAsg.agentSnapshot ? (typeof selectedAsg.agentSnapshot === 'string' ? JSON.parse(selectedAsg.agentSnapshot) : selectedAsg.agentSnapshot) : null;
         var selectedAgentEmail = (selectedAsg && (selectedAsg.agentEmail || selectedAsg.agent_email)) || '';
-        if (!agentSnap) {
-            agentSnap = {
-                displayName: resolvedAgentName,
-                fullName: resolvedAgentName,
-                email: selectedAgentEmail,
-                agentEmail: selectedAgentEmail
-            };
-        } else if (typeof agentSnap === 'object') {
-            if (!agentSnap.email && selectedAgentEmail) {
-                agentSnap.email = selectedAgentEmail;
-            }
-        }
+        var subEmail = (agentSnap && (agentSnap.toasttabEmail || agentSnap.email)) || selectedAgentEmail || '';
+        agentSnap = {
+            eid: (agentSnap && agentSnap.eid) ? String(agentSnap.eid) : '',
+            role: (agentSnap && agentSnap.role) || 'Agent',
+            tier: (agentSnap && agentSnap.tier) || '',
+            wave: (agentSnap && agentSnap.wave) || '',
+            skill: (agentSnap && agentSnap.skill) || '',
+            channel: (agentSnap && agentSnap.channel) || '',
+            manager: (agentSnap && agentSnap.manager) || '',
+            fullName: (agentSnap && (agentSnap.fullName || agentSnap.displayName)) || resolvedAgentName || '',
+            location: (agentSnap && agentSnap.location) || '',
+            caseSafeId: (agentSnap && agentSnap.caseSafeId) || '',
+            supervisor: (agentSnap && agentSnap.supervisor) || '',
+            displayName: (agentSnap && (agentSnap.displayName || agentSnap.fullName)) || resolvedAgentName || '',
+            toasttabEmail: subEmail,
+            productionDate: (agentSnap && agentSnap.productionDate) || '',
+            internalIbexEmail: (agentSnap && agentSnap.internalIbexEmail) || ''
+        };
 
         var resolvedQaName = currentQaDisplayName || storage.get('qa_name', '') || formatEmailToName(QA_EMAIL) || QA_EMAIL;
 

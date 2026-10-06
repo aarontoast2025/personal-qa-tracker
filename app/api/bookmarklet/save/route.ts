@@ -65,23 +65,68 @@ export async function POST(request: Request) {
         // preserve as string or null
       }
     }
-    const aEmail = evalData.agentEmail || evalData.agent_email || (agentSnapshot && (agentSnapshot.email || agentSnapshot.toasttab_email)) || "";
-    if (aEmail && typeof agentSnapshot === "object" && agentSnapshot !== null) {
-      agentSnapshot.email = aEmail;
-    } else if (!agentSnapshot && aEmail) {
-      agentSnapshot = {
-        name: evalData.agentName || evalData.agent_name || "Unknown",
-        email: aEmail,
-      };
+    const aEmail = (
+      evalData.agentEmail ||
+      evalData.agent_email ||
+      (agentSnapshot && (agentSnapshot.toasttabEmail || agentSnapshot.email || agentSnapshot.toasttab_email)) ||
+      ""
+    ).trim().toLowerCase();
+
+    let dbAgent: any = null;
+    if (aEmail) {
+      const { data: matchedAgent } = await supabase
+        .from("agents")
+        .select("eid, case_safe_id, toasttab_email, internal_ibex_email, full_name, display_name, location, skill, channel, tier, role, wave, production_date, supervisor, manager")
+        .or(`toasttab_email.ilike.${aEmail},internal_ibex_email.ilike.${aEmail}`)
+        .maybeSingle();
+      dbAgent = matchedAgent;
     }
+
+    const toasttabEmail =
+      (agentSnapshot && agentSnapshot.toasttabEmail) ||
+      dbAgent?.toasttab_email ||
+      (agentSnapshot && agentSnapshot.email) ||
+      aEmail;
+
+    const fullName =
+      (agentSnapshot && agentSnapshot.fullName) ||
+      dbAgent?.full_name ||
+      (agentSnapshot && agentSnapshot.displayName) ||
+      dbAgent?.display_name ||
+      evalData.agentName ||
+      evalData.agent_name ||
+      "";
+
+    const displayName =
+      (agentSnapshot && agentSnapshot.displayName) ||
+      dbAgent?.display_name ||
+      fullName;
+
+    const canonicalSnapshot = {
+      eid: String((agentSnapshot && agentSnapshot.eid) || dbAgent?.eid || "").trim(),
+      role: (agentSnapshot && agentSnapshot.role) || dbAgent?.role || "Agent",
+      tier: (agentSnapshot && agentSnapshot.tier) || dbAgent?.tier || "",
+      wave: (agentSnapshot && agentSnapshot.wave) || dbAgent?.wave || "",
+      skill: (agentSnapshot && agentSnapshot.skill) || dbAgent?.skill || "",
+      channel: (agentSnapshot && agentSnapshot.channel) || dbAgent?.channel || "",
+      manager: (agentSnapshot && agentSnapshot.manager) || dbAgent?.manager || "",
+      fullName,
+      location: (agentSnapshot && agentSnapshot.location) || dbAgent?.location || "",
+      caseSafeId: (agentSnapshot && agentSnapshot.caseSafeId) || dbAgent?.case_safe_id || "",
+      supervisor: (agentSnapshot && agentSnapshot.supervisor) || dbAgent?.supervisor || "",
+      displayName,
+      toasttabEmail,
+      productionDate: (agentSnapshot && agentSnapshot.productionDate) || dbAgent?.production_date || "",
+      internalIbexEmail: (agentSnapshot && agentSnapshot.internalIbexEmail) || dbAgent?.internal_ibex_email || "",
+    };
 
     const evaluationRecord = {
       id: evalId,
       submitted_at: nowIso,
       interaction_id: interactionId,
       assignment_id: assignmentId,
-      agent_name: evalData.agentName || evalData.agent_name || "Unknown",
-      agent_snapshot: agentSnapshot,
+      agent_name: displayName || fullName || evalData.agentName || evalData.agent_name || "Unknown",
+      agent_snapshot: canonicalSnapshot,
       qa_name: evalData.qaName || evalData.qa_name || "QA Evaluator",
       qa_email: evalData.qaEmail || evalData.qa_email || null,
       score: typeof evalData.score === "number" ? evalData.score : parseFloat(evalData.score) || 0,
@@ -120,12 +165,13 @@ export async function POST(request: Request) {
       );
     }
 
-    // 2. Mark the associated assignment as 'Partial' in Supabase
+    // 2. Mark the associated assignment as 'Partial' in Supabase and update agent_snapshot
     if (assignmentId) {
       const { error: asgError } = await supabase
         .from("assignments")
         .update({
           status: "Partial",
+          agent_snapshot: canonicalSnapshot,
           synced_at: nowIso,
         })
         .eq("id", assignmentId);

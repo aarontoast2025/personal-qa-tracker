@@ -38,6 +38,98 @@ export function safeJsonParse(val: any, fallback: any = {}) {
   }
 }
 
+export interface CanonicalAgentSnapshot {
+  eid: string;
+  role: string;
+  tier: string;
+  wave: string;
+  skill: string;
+  channel: string;
+  manager: string;
+  fullName: string;
+  location: string;
+  caseSafeId: string;
+  supervisor: string;
+  displayName: string;
+  toasttabEmail: string;
+  productionDate: string;
+  internalIbexEmail: string;
+}
+
+/**
+ * Normalizes agent snapshot to canonical 15 Google Sheet schema fields.
+ * Explicitly maps to toasttabEmail and never creates an 'email' key.
+ */
+export function normalizeAgentSnapshot(
+  rawSnap: any,
+  fallbackEmail: string = "",
+  fallbackName: string = "",
+  agentLookupMap?: Record<string, any>
+): CanonicalAgentSnapshot | null {
+  let snap: any = safeJsonParse(rawSnap, null);
+  const email = (fallbackEmail || "").trim().toLowerCase();
+  const name = (fallbackName || "").trim().toLowerCase();
+
+  let rosterAgent: any = null;
+  if (agentLookupMap) {
+    rosterAgent =
+      (email && agentLookupMap[email]) ||
+      (name && agentLookupMap[name]) ||
+      (snap?.eid && agentLookupMap[String(snap.eid).toLowerCase().trim()]) ||
+      (snap?.toasttabEmail && agentLookupMap[String(snap.toasttabEmail).toLowerCase().trim()]) ||
+      (snap?.email && agentLookupMap[String(snap.email).toLowerCase().trim()]) ||
+      null;
+  }
+
+  if (!snap && !rosterAgent && !fallbackEmail && !fallbackName) {
+    return null;
+  }
+
+  const toasttabEmail =
+    snap?.toasttabEmail ||
+    rosterAgent?.toasttab_email ||
+    rosterAgent?.toasttabEmail ||
+    snap?.email ||
+    snap?.toasttab_email ||
+    fallbackEmail ||
+    "";
+
+  const fullName =
+    snap?.fullName ||
+    rosterAgent?.full_name ||
+    rosterAgent?.fullName ||
+    snap?.displayName ||
+    rosterAgent?.display_name ||
+    fallbackName ||
+    "";
+
+  const displayName =
+    snap?.displayName ||
+    rosterAgent?.display_name ||
+    rosterAgent?.displayName ||
+    fullName ||
+    fallbackName ||
+    "";
+
+  return {
+    eid: String(snap?.eid || rosterAgent?.eid || "").trim(),
+    role: snap?.role || rosterAgent?.role || "Agent",
+    tier: snap?.tier || rosterAgent?.tier || "",
+    wave: snap?.wave || rosterAgent?.wave || "",
+    skill: snap?.skill || rosterAgent?.skill || "",
+    channel: snap?.channel || rosterAgent?.channel || "",
+    manager: snap?.manager || rosterAgent?.manager || "",
+    fullName,
+    location: snap?.location || rosterAgent?.location || "",
+    caseSafeId: snap?.caseSafeId || rosterAgent?.case_safe_id || rosterAgent?.caseSafeId || "",
+    supervisor: snap?.supervisor || rosterAgent?.supervisor || "",
+    displayName,
+    toasttabEmail,
+    productionDate: snap?.productionDate || rosterAgent?.production_date || rosterAgent?.productionDate || "",
+    internalIbexEmail: snap?.internalIbexEmail || rosterAgent?.internal_ibex_email || rosterAgent?.internalIbexEmail || "",
+  };
+}
+
 export async function syncAgents(
   supabase: SupabaseClient,
   rows: any[]
@@ -45,26 +137,24 @@ export async function syncAgents(
   if (!rows || rows.length === 0) return 0;
 
   const records = rows
-    .filter((r) => r.EID && r["Full Name"])
+    .filter((r) => (r.EID || r.eid) && (r["Full Name"] || r.fullName || r.full_name))
     .map((r) => ({
-      eid: String(r.EID).trim(),
-      case_safe_id: r["Case Safe ID"] || null,
-      toasttab_email: r["Toasttab Email"] || null,
-      internal_ibex_email: r["Internal IBEX Email"] || null,
-      full_name: r["Full Name"].trim(),
-      display_name: r["Display Name"] || r["Full Name"],
-      location: r.Location || null,
-      skill: r.Skill || null,
-      channel: r.Channel || null,
-      tier: r.Tier || null,
-      role: r.Role || "Agent",
-      status: r.Status || "Active",
-      wave: r.Wave || null,
-      production_date: r["Production Date"]
-        ? normalizeDate(r["Production Date"])
-        : null,
-      supervisor: r.Supervisor || null,
-      manager: r.Manager || null,
+      eid: String(r.EID || r.eid).trim(),
+      case_safe_id: r["Case Safe ID"] || r.caseSafeId || r.case_safe_id || null,
+      toasttab_email: r["Toasttab Email"] || r.toasttabEmail || r.toastEmail || r.toasttab_email || r.email || null,
+      internal_ibex_email: r["Internal IBEX Email"] || r.internalIbexEmail || r.internal_ibex_email || null,
+      full_name: String(r["Full Name"] || r.fullName || r.full_name || "").trim(),
+      display_name: r["Display Name"] || r.displayName || r.display_name || r["Full Name"] || r.fullName,
+      location: r.Location || r.location || null,
+      skill: r.Skill || r.skill || null,
+      channel: r.Channel || r.channel || null,
+      tier: r.Tier || r.tier || null,
+      role: r.Role || r.role || "Agent",
+      status: r.Status || r.status || "Active",
+      wave: r.Wave || r.wave || null,
+      production_date: normalizeDate(r["Production Date"] || r.productionDate || r.production_date),
+      supervisor: r.Supervisor || r.supervisor || null,
+      manager: r.Manager || r.manager || null,
       created_at: r["Created At"] || new Date().toISOString(),
       synced_at: new Date().toISOString(),
     }));
@@ -87,24 +177,50 @@ export async function syncAssignments(
 ): Promise<number> {
   if (!rows || rows.length === 0) return 0;
 
+  // Load agent roster from Supabase to enrich assignments missing full snapshot details
+  const { data: dbAgents } = await supabase
+    .from("agents")
+    .select("eid, case_safe_id, toasttab_email, internal_ibex_email, full_name, display_name, location, skill, channel, tier, role, wave, production_date, supervisor, manager");
+
+  const agentLookupMap: Record<string, any> = {};
+  if (dbAgents && Array.isArray(dbAgents)) {
+    dbAgents.forEach((a) => {
+      if (a.eid) agentLookupMap[String(a.eid).toLowerCase().trim()] = a;
+      if (a.toasttab_email) agentLookupMap[String(a.toasttab_email).toLowerCase().trim()] = a;
+      if (a.internal_ibex_email) agentLookupMap[String(a.internal_ibex_email).toLowerCase().trim()] = a;
+      if (a.full_name) agentLookupMap[String(a.full_name).toLowerCase().trim()] = a;
+      if (a.display_name) agentLookupMap[String(a.display_name).toLowerCase().trim()] = a;
+    });
+  }
+
   const records = rows
     .filter((r) => (r.ID || r.id) && (r["QA Email"] || r.qaEmail || r.qa_email))
-    .map((r) => ({
-      id: String(r.ID || r.id).trim(),
-      date: normalizeDate(r.Date || r.date),
-      qa_email: String(r["QA Email"] || r.qaEmail || r.qa_email).trim().toLowerCase(),
-      agent_email: String(r["Agent Email"] || r.agentEmail || r.agent_email || "").trim().toLowerCase(),
-      agent_snapshot: safeJsonParse(r["Agent Snapshot"] || r.agentSnapshot || r.agent_snapshot),
-      rubric_id: r["Rubric ID"] || r.rubricId || r.rubric_id || null,
-      status: r.Status || r.status || "Pending",
-      swap_data: r["Swap Data"]
-        ? safeJsonParse(r["Swap Data"])
-        : (r.swapData ? safeJsonParse(r.swapData) : null),
-      assigned_by: r["Assigned By"] || r.assignedBy || r.assigned_by || null,
-      evaluation_type: r["Evaluation Type"] || r.evaluationType || r.evaluation_type || "Manual Audit",
-      timestamp: r.Timestamp || r.timestamp || new Date().toISOString(),
-      synced_at: new Date().toISOString(),
-    }));
+    .map((r) => {
+      const agentEmail = String(r["Agent Email"] || r.agentEmail || r.agent_email || "").trim().toLowerCase();
+      const agentName = String(r["Agent Name"] || r.agentName || r.agent_name || "");
+      const snap = normalizeAgentSnapshot(
+        r["Agent Snapshot"] || r.agentSnapshot || r.agent_snapshot,
+        agentEmail,
+        agentName,
+        agentLookupMap
+      );
+      return {
+        id: String(r.ID || r.id).trim(),
+        date: normalizeDate(r.Date || r.date),
+        qa_email: String(r["QA Email"] || r.qaEmail || r.qa_email).trim().toLowerCase(),
+        agent_email: agentEmail,
+        agent_snapshot: snap,
+        rubric_id: r["Rubric ID"] || r.rubricId || r.rubric_id || null,
+        status: r.Status || r.status || "Pending",
+        swap_data: r["Swap Data"]
+          ? safeJsonParse(r["Swap Data"])
+          : (r.swapData ? safeJsonParse(r.swapData) : null),
+        assigned_by: r["Assigned By"] || r.assignedBy || r.assigned_by || null,
+        evaluation_type: r["Evaluation Type"] || r.evaluationType || r.evaluation_type || "Manual Audit",
+        timestamp: r.Timestamp || r.timestamp || new Date().toISOString(),
+        synced_at: new Date().toISOString(),
+      };
+    });
 
   const { error } = await supabase
     .from("assignments")
@@ -125,7 +241,14 @@ export async function syncAssignments(
     .map((r) => {
       const asgId = String(r.ID || r.id).trim();
       const iId = String(r.interactionId || r.interaction_id || r["Interaction ID"]).trim();
-      const snap = safeJsonParse(r["Agent Snapshot"] || r.agentSnapshot || r.agent_snapshot, {});
+      const agentEmail = String(r["Agent Email"] || r.agentEmail || r.agent_email || "").trim().toLowerCase();
+      const agentName = String(r["Agent Name"] || r.agentName || r.agent_name || "");
+      const snap = normalizeAgentSnapshot(
+        r["Agent Snapshot"] || r.agentSnapshot || r.agent_snapshot,
+        agentEmail,
+        agentName,
+        agentLookupMap
+      );
       const qaMail = String(r["QA Email"] || r.qaEmail || r.qa_email || "").trim().toLowerCase();
       const rawDetails = r["Evaluation Details"] || r.evaluationDetails || r.details;
       return {
@@ -134,7 +257,7 @@ export async function syncAssignments(
         interaction_id: iId,
         score: parseFloat(r.Score ?? r.score) || 0,
         submitted_at: r["Submitted At"] || r.submittedAt || r.submitted_at || new Date().toISOString(),
-        agent_name: snap?.displayName || snap?.fullName || r.agentName || r.agent_name || r.agent_email || "Unknown",
+        agent_name: snap?.displayName || snap?.fullName || agentName || agentEmail || "Unknown",
         agent_snapshot: snap,
         rubric_id: r["Rubric ID"] || r.rubricId || r.rubric_id || null,
         evaluation_type: r["Evaluation Type"] || r.evaluationType || r.evaluation_type || "Manual Audit",
@@ -169,6 +292,22 @@ export async function syncEvaluations(
   const { data: knownAsgs } = await supabase.from("assignments").select("id");
   const knownAsgIds = new Set((knownAsgs || []).map((a) => a.id));
 
+  // Load agent roster from Supabase to enrich evaluation snapshots missing details
+  const { data: dbAgents } = await supabase
+    .from("agents")
+    .select("eid, case_safe_id, toasttab_email, internal_ibex_email, full_name, display_name, location, skill, channel, tier, role, wave, production_date, supervisor, manager");
+
+  const agentLookupMap: Record<string, any> = {};
+  if (dbAgents && Array.isArray(dbAgents)) {
+    dbAgents.forEach((a) => {
+      if (a.eid) agentLookupMap[String(a.eid).toLowerCase().trim()] = a;
+      if (a.toasttab_email) agentLookupMap[String(a.toasttab_email).toLowerCase().trim()] = a;
+      if (a.internal_ibex_email) agentLookupMap[String(a.internal_ibex_email).toLowerCase().trim()] = a;
+      if (a.full_name) agentLookupMap[String(a.full_name).toLowerCase().trim()] = a;
+      if (a.display_name) agentLookupMap[String(a.display_name).toLowerCase().trim()] = a;
+    });
+  }
+
   const records = rows
     .filter((r) => (r.ID || r.id) && (r["Interaction ID"] || r.interactionId || r.interaction_id))
     .map((r) => {
@@ -176,7 +315,14 @@ export async function syncEvaluations(
         ? String(r["Assignment ID"] || r.assignmentId || r.assignment_id).trim()
         : null;
       const validAsgId = rawAsgId && knownAsgIds.has(rawAsgId) ? rawAsgId : null;
-      const agentSnap = safeJsonParse(r["Agent Snapshot"] || r.agentSnapshot || r.agent_snapshot, {});
+      const agentEmail = String(r["Agent Email"] || r.agentEmail || r.agent_email || "").trim().toLowerCase();
+      const agentName = String(r["Agent Name"] || r.agentName || r.agent_name || "");
+      const agentSnap = normalizeAgentSnapshot(
+        r["Agent Snapshot"] || r.agentSnapshot || r.agent_snapshot,
+        agentEmail,
+        agentName,
+        agentLookupMap
+      );
       const rawDetails = r["Evaluation Details"] || r.evaluationDetails || r.details;
       const evalDetails = safeJsonParse(rawDetails, typeof rawDetails === "object" && rawDetails !== null ? rawDetails : {});
 

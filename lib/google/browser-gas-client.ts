@@ -242,8 +242,8 @@ export function browserFormPostRequest<T = any>(
 export function compactEvaluationData(data: Record<string, any>): Record<string, any> {
   const clone = { ...data };
 
-  // 1. Preserve complete agent snapshot details
-  if (clone.agentSnapshot && typeof clone.agentSnapshot === "object") {
+  // 1. Preserve complete agent snapshot details with canonical schema matching Google Sheet
+  if (clone.agentSnapshot) {
     let snap = clone.agentSnapshot;
     if (typeof snap === "string") {
       try {
@@ -253,12 +253,29 @@ export function compactEvaluationData(data: Record<string, any>): Record<string,
       }
     }
     if (snap && typeof snap === "object") {
+      const toasttabEmail =
+        snap.toasttabEmail || snap.email || clone.agentEmail || "";
+      const fullName =
+        snap.fullName || snap.displayName || clone.agentName || "";
+      const displayName =
+        snap.displayName || snap.fullName || clone.agentName || fullName;
+
       clone.agentSnapshot = {
-        ...snap,
-        displayName: snap.displayName || clone.agentName || snap.fullName || "",
-        fullName: snap.fullName || snap.displayName || clone.agentName || "",
-        toasttabEmail: snap.toasttabEmail || snap.email || clone.agentEmail || "",
+        eid: snap.eid ? String(snap.eid) : "",
         role: snap.role || "Agent",
+        tier: snap.tier || "",
+        wave: snap.wave || "",
+        skill: snap.skill || "",
+        channel: snap.channel || "",
+        manager: snap.manager || "",
+        fullName,
+        location: snap.location || "",
+        caseSafeId: snap.caseSafeId || snap.case_safe_id || "",
+        supervisor: snap.supervisor || "",
+        displayName,
+        toasttabEmail,
+        productionDate: snap.productionDate || snap.production_date || "",
+        internalIbexEmail: snap.internalIbexEmail || snap.internal_ibex_email || "",
       };
     }
   }

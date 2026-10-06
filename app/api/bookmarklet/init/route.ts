@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
+import { normalizeAgentSnapshot } from "@/lib/google/sync-service";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -58,14 +59,11 @@ export async function GET(request: Request) {
 
     // Transform assignments for bookmarklet format
     const formattedAssignments = (assignments || []).map((a) => {
-      let agentSnap = a.agent_snapshot;
-      if (typeof agentSnap === "string") {
-        try {
-          agentSnap = JSON.parse(agentSnap);
-        } catch {
-          // ignore
-        }
-      }
+      const agentSnap = normalizeAgentSnapshot(
+        a.agent_snapshot,
+        a.agent_email,
+        ""
+      );
       return {
         id: a.id,
         date: a.date,

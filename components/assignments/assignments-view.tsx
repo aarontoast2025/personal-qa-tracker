@@ -462,6 +462,7 @@ export function AssignmentsView({ userEmail, initialWebAppUrl }: AssignmentsView
           action: "confirm",
           assignmentId: asgId,
           evaluationId: gasResult?.evaluationId || prepData.evaluationData?.id,
+          agentSnapshot: prepData.evaluationData?.agentSnapshot,
         }),
       });
       const confirmData = await confirmRes.json();
@@ -470,7 +471,16 @@ export function AssignmentsView({ userEmail, initialWebAppUrl }: AssignmentsView
       }
 
       setAssignments((prev) =>
-        prev.map((a) => (a.id === asgId ? { ...a, status: "Completed" } : a))
+        prev.map((a) =>
+          a.id === asgId
+            ? {
+                ...a,
+                status: "Completed",
+                agent_snapshot:
+                  prepData.evaluationData?.agentSnapshot || a.agent_snapshot,
+              }
+            : a
+        )
       );
       if (prepData.evaluationData) {
         setEvalMap((prev) => ({

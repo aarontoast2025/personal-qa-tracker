@@ -35,23 +35,33 @@ export async function POST(request: Request) {
     // Handle confirm action: user's browser already submitted to Google Apps Script
     if (action === "confirm") {
       const evaluationId = body.evaluationId;
+      const agentSnapshot = body.agentSnapshot;
       const nowIso = new Date().toISOString();
+
+      const asgUpdate: Record<string, any> = {
+        status: "Completed",
+        synced_at: nowIso,
+      };
+      if (agentSnapshot && typeof agentSnapshot === "object") {
+        asgUpdate.agent_snapshot = agentSnapshot;
+      }
 
       await supabase
         .from("assignments")
-        .update({
-          status: "Completed",
-          synced_at: nowIso,
-        })
+        .update(asgUpdate)
         .eq("id", assignmentId);
 
       if (evaluationId) {
+        const evalUpdate: Record<string, any> = {
+          sync_status: "synced",
+          synced_at: nowIso,
+        };
+        if (agentSnapshot && typeof agentSnapshot === "object") {
+          evalUpdate.agent_snapshot = agentSnapshot;
+        }
         await supabase
           .from("evaluations")
-          .update({
-            sync_status: "synced",
-            synced_at: nowIso,
-          })
+          .update(evalUpdate)
           .eq("id", evaluationId);
       }
 
@@ -119,12 +129,74 @@ export async function POST(request: Request) {
 
     // 3. Format payload to match Google Sheet structure & Google Apps Script API
     const config = await getWebAppConfig(supabase);
-    const agentSnapshot = evaluation.agent_snapshot || assignment.agent_snapshot || {};
-    const agentName =
+    let rawSnap = evaluation.agent_snapshot || assignment.agent_snapshot || {};
+    if (typeof rawSnap === "string") {
+      try {
+        rawSnap = JSON.parse(rawSnap);
+      } catch {
+        rawSnap = {};
+      }
+    }
+
+    // Lookup agent from database to complete any missing snapshot details
+    const lookupEmail = (
+      assignment.agent_email ||
+      rawSnap.toasttabEmail ||
+      rawSnap.email ||
+      ""
+    ).trim().toLowerCase();
+
+    let dbAgent: any = null;
+    if (lookupEmail) {
+      const { data: matchedAgent } = await supabase
+        .from("agents")
+        .select("eid, case_safe_id, toasttab_email, internal_ibex_email, full_name, display_name, location, skill, channel, tier, role, wave, production_date, supervisor, manager")
+        .or(`toasttab_email.ilike.${lookupEmail},internal_ibex_email.ilike.${lookupEmail}`)
+        .maybeSingle();
+      dbAgent = matchedAgent;
+    }
+
+    const toasttabEmail =
+      rawSnap.toasttabEmail ||
+      dbAgent?.toasttab_email ||
+      rawSnap.email ||
+      lookupEmail;
+
+    const fullName =
+      rawSnap.fullName ||
+      dbAgent?.full_name ||
+      rawSnap.displayName ||
+      dbAgent?.display_name ||
       evaluation.agent_name ||
-      agentSnapshot.displayName ||
-      agentSnapshot.fullName ||
-      assignment.agent_email;
+      "";
+
+    const displayName =
+      rawSnap.displayName ||
+      dbAgent?.display_name ||
+      rawSnap.fullName ||
+      dbAgent?.full_name ||
+      evaluation.agent_name ||
+      fullName;
+
+    const canonicalSnapshot = {
+      eid: String(rawSnap.eid || dbAgent?.eid || "").trim(),
+      role: rawSnap.role || dbAgent?.role || "Agent",
+      tier: rawSnap.tier || dbAgent?.tier || "",
+      wave: rawSnap.wave || dbAgent?.wave || "",
+      skill: rawSnap.skill || dbAgent?.skill || "",
+      channel: rawSnap.channel || dbAgent?.channel || "",
+      manager: rawSnap.manager || dbAgent?.manager || "",
+      fullName,
+      location: rawSnap.location || dbAgent?.location || "",
+      caseSafeId: rawSnap.caseSafeId || dbAgent?.case_safe_id || "",
+      supervisor: rawSnap.supervisor || dbAgent?.supervisor || "",
+      displayName,
+      toasttabEmail,
+      productionDate: rawSnap.productionDate || dbAgent?.production_date || "",
+      internalIbexEmail: rawSnap.internalIbexEmail || dbAgent?.internal_ibex_email || "",
+    };
+
+    const agentName = displayName || fullName || assignment.agent_email;
 
     const evaluationData = {
       id: evaluation.id,
@@ -133,7 +205,7 @@ export async function POST(request: Request) {
       interactionId: evaluation.interaction_id || "",
       agentName,
       agentEmail: assignment.agent_email,
-      agentSnapshot,
+      agentSnapshot: canonicalSnapshot,
       qaName: evaluation.qa_name || "QA Evaluator",
       score:
         typeof evaluation.score === "number"
@@ -178,20 +250,22 @@ export async function POST(request: Request) {
 
     const nowIso = new Date().toISOString();
 
-    // 5. Update assignment status to 'Completed' in Supabase
+    // 5. Update assignment status to 'Completed' in Supabase AND update agent_snapshot
     await supabase
       .from("assignments")
       .update({
         status: "Completed",
+        agent_snapshot: canonicalSnapshot,
         synced_at: nowIso,
       })
       .eq("id", assignmentId);
 
-    // 6. Update evaluation sync_status to 'synced' in Supabase
+    // 6. Update evaluation sync_status to 'synced' in Supabase AND update agent_snapshot
     await supabase
       .from("evaluations")
       .update({
         sync_status: "synced",
+        agent_snapshot: canonicalSnapshot,
         synced_at: nowIso,
       })
       .eq("id", evaluation.id);
