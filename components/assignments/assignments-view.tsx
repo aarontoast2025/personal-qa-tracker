@@ -447,7 +447,7 @@ export function AssignmentsView({ userEmail, initialWebAppUrl }: AssignmentsView
 
       // 2. Submit to Google Apps Script directly from the browser using active Toast session
       const targetUrl = prepData.webAppUrl || webAppUrl || DEFAULT_WEB_APP_URL;
-      await submitEvaluationBrowser(
+      const gasResult = await submitEvaluationBrowser(
         targetUrl,
         DEFAULT_API_TOKEN,
         prepData.qaEmail || userEmail,
@@ -461,7 +461,7 @@ export function AssignmentsView({ userEmail, initialWebAppUrl }: AssignmentsView
         body: JSON.stringify({
           action: "confirm",
           assignmentId: asgId,
-          evaluationId: prepData.evaluationData?.id,
+          evaluationId: gasResult?.evaluationId || prepData.evaluationData?.id,
         }),
       });
       const confirmData = await confirmRes.json();
@@ -472,6 +472,16 @@ export function AssignmentsView({ userEmail, initialWebAppUrl }: AssignmentsView
       setAssignments((prev) =>
         prev.map((a) => (a.id === asgId ? { ...a, status: "Completed" } : a))
       );
+      if (prepData.evaluationData) {
+        setEvalMap((prev) => ({
+          ...prev,
+          [asgId]: {
+            ...(prev[asgId] || {}),
+            ...prepData.evaluationData,
+            id: gasResult?.evaluationId || prepData.evaluationData?.id || prev[asgId]?.id,
+          },
+        }));
+      }
       setSyncNotice(`Assignment ${asgId} successfully pushed to Google Sheet and marked Completed!`);
       setTimeout(() => setSyncNotice(null), 5000);
     } catch (err: any) {

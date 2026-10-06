@@ -126,15 +126,10 @@ export async function POST(request: Request) {
       agentSnapshot.fullName ||
       assignment.agent_email;
 
-    const isActualPartial =
-      assignment.status === "Partial" &&
-      (!evaluation.evaluation_details ||
-        Object.keys(evaluation.evaluation_details).length === 0) &&
-      (!evaluation.score || evaluation.score === 0);
-
     const evaluationData = {
       id: evaluation.id,
       assignmentId: assignment.id,
+      assignment_id: assignment.id,
       interactionId: evaluation.interaction_id || "",
       agentName,
       agentEmail: assignment.agent_email,
@@ -157,8 +152,9 @@ export async function POST(request: Request) {
       comments: evaluation.comments || "",
       evaluationType:
         evaluation.evaluation_type || assignment.evaluation_type || "Manual Audit",
-      status: isActualPartial ? "Partial" : "Completed",
-      isPartial: isActualPartial,
+      status: "Completed",
+      assignmentStatus: "Completed",
+      isPartial: false,
     };
 
     const qaEmail = assignment.qa_email || user?.email || "";
