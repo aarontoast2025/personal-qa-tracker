@@ -126,6 +126,12 @@ export async function POST(request: Request) {
       agentSnapshot.fullName ||
       assignment.agent_email;
 
+    const isActualPartial =
+      assignment.status === "Partial" &&
+      (!evaluation.evaluation_details ||
+        Object.keys(evaluation.evaluation_details).length === 0) &&
+      (!evaluation.score || evaluation.score === 0);
+
     const evaluationData = {
       id: evaluation.id,
       assignmentId: assignment.id,
@@ -139,6 +145,7 @@ export async function POST(request: Request) {
           ? evaluation.score
           : parseFloat(evaluation.score) || 0,
       rubricId: evaluation.rubric_id || assignment.rubric_id || "toast-standard-qa",
+      rubric_id: evaluation.rubric_id || assignment.rubric_id || "toast-standard-qa",
       details: evaluation.evaluation_details || {},
       dateOfInteraction: evaluation.date_of_interaction || "",
       callDuration: evaluation.call_duration || "",
@@ -150,8 +157,8 @@ export async function POST(request: Request) {
       comments: evaluation.comments || "",
       evaluationType:
         evaluation.evaluation_type || assignment.evaluation_type || "Manual Audit",
-      status: "Completed",
-      isPartial: false,
+      status: isActualPartial ? "Partial" : "Completed",
+      isPartial: isActualPartial,
     };
 
     const qaEmail = assignment.qa_email || user?.email || "";

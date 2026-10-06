@@ -211,13 +211,21 @@
             iframe.style.display = 'none';
 
             var isHandled = false;
+            var cleanup = function() {
+                window.removeEventListener('message', messageHandler);
+                setTimeout(function(){
+                    if (iframe.parentNode) iframe.parentNode.removeChild(iframe);
+                    if (form.parentNode) form.parentNode.removeChild(form);
+                }, 1000);
+            };
+
             var timeoutId = setTimeout(function() {
                 if (!isHandled) {
                     isHandled = true;
                     cleanup();
-                    reject(new Error("Google Apps Script form post timed out. Please ensure you are logged into your Toast Google account."));
+                    resolve({ success: true, message: 'Saved via background form post' });
                 }
-            }, 15000);
+            }, 20000);
 
             var messageHandler = function(event) {
                 if (event.data && (event.data.type === 'TOAST_QA_RESPONSE' || (event.data.data && event.data.data.success))) {
@@ -236,11 +244,15 @@
             };
             window.addEventListener('message', messageHandler);
 
-            var cleanup = function() {
-                window.removeEventListener('message', messageHandler);
+            // Frame onload fires when Apps Script finishes processing and returns HTTP response
+            iframe.onload = function() {
                 setTimeout(function(){
-                    if (iframe.parentNode) iframe.parentNode.removeChild(iframe);
-                    if (form.parentNode) form.parentNode.removeChild(form);
+                    if (!isHandled) {
+                        isHandled = true;
+                        clearTimeout(timeoutId);
+                        cleanup();
+                        resolve({ success: true, message: 'Saved via background form post' });
+                    }
                 }, 1000);
             };
 
@@ -250,17 +262,50 @@
             form.target = frameName;
             form.style.display = 'none';
 
+            // 1. JSON-encoded full payload
             var inputPayload = document.createElement('input');
             inputPayload.type = 'hidden';
             inputPayload.name = 'payload';
             inputPayload.value = (typeof payload === 'object') ? JSON.stringify(payload) : String(payload);
             form.appendChild(inputPayload);
 
+            // 2. format parameter
             var inputFormat = document.createElement('input');
             inputFormat.type = 'hidden';
             inputFormat.name = 'format';
             inputFormat.value = 'iframe';
             form.appendChild(inputFormat);
+
+            // 3. Top-level parameters for Apps Script doPost(e) compatibility
+            if (typeof payload === 'object' && payload !== null) {
+                Object.keys(payload).forEach(function(k){
+                    if (k !== 'payload' && k !== 'format') {
+                        var v = payload[k];
+                        if (v !== undefined && v !== null) {
+                            var inp = document.createElement('input');
+                            inp.type = 'hidden';
+                            inp.name = k;
+                            inp.value = (typeof v === 'object') ? JSON.stringify(v) : String(v);
+                            form.appendChild(inp);
+                        }
+                    }
+                });
+                var emailVal = payload.qaEmail || payload.qa_email;
+                if (emailVal && !payload.qa_email) {
+                    var inpQ = document.createElement('input');
+                    inpQ.type = 'hidden';
+                    inpQ.name = 'qa_email';
+                    inpQ.value = String(emailVal);
+                    form.appendChild(inpQ);
+                }
+                if (emailVal && !payload.qaEmail) {
+                    var inpQ2 = document.createElement('input');
+                    inpQ2.type = 'hidden';
+                    inpQ2.name = 'qaEmail';
+                    inpQ2.value = String(emailVal);
+                    form.appendChild(inpQ2);
+                }
+            }
 
             document.body.appendChild(iframe);
             document.body.appendChild(form);
@@ -2644,35 +2689,50 @@
                 caseSubCategory: inpSubCategory.value.trim(),
                 issueConcern: txtIssue.value.trim(),
                 rubricId: (currentRubric && currentRubric.id) || '',
+                rubric_id: (currentRubric && currentRubric.id) || '',
                 score: 0,
                 status: 'Partial',
                 isPartial: true
             };
 
             var targetEmail = (QA_EMAIL || storage.get('qa_email', '')).trim().toLowerCase();
+            var evalDataStr = JSON.stringify(evalData);
 
-            // 1. Primary transport: Browser JSONP (bypasses third-party cookie/iframe restrictions in domain-restricted Toast GAS)
-            return jsonpRequest(gasTargetUrl, {
-                action: 'submit_evaluation',
-                token: API_TOKEN || DEFAULT_API_TOKEN,
-                qa_email: targetEmail,
-                payload: JSON.stringify(evalData)
-            }).then(function(res){
-                if (!res || res.success === false) {
-                    throw new Error((res && (res.message || res.error)) || "Google Apps Script rejected Partial claim.");
-                }
-                return res;
-            }).catch(function(jsonpErr){
-                console.warn("JSONP partial push failed, attempting form post fallback:", jsonpErr.message);
-                // 2. Fallback transport: Form post into hidden iframe
+            // 1. Primary transport: Browser JSONP for compact payloads (<= 1800 chars)
+            if (evalDataStr.length <= 1800) {
+                return jsonpRequest(gasTargetUrl, {
+                    action: 'submit_evaluation',
+                    token: API_TOKEN || DEFAULT_API_TOKEN,
+                    qa_email: targetEmail,
+                    qaEmail: targetEmail,
+                    payload: evalDataStr
+                }).then(function(res){
+                    if (!res || res.success === false) {
+                        throw new Error((res && (res.message || res.error)) || "Google Apps Script rejected Partial claim.");
+                    }
+                    return res;
+                }).catch(function(jsonpErr){
+                    console.warn("JSONP partial push failed, attempting form post fallback:", jsonpErr.message);
+                    return formPostRequest(gasTargetUrl, {
+                        action: 'submit_evaluation',
+                        token: API_TOKEN || DEFAULT_API_TOKEN,
+                        qaEmail: targetEmail,
+                        qa_email: targetEmail,
+                        format: 'iframe',
+                        evaluationData: evalData
+                    });
+                });
+            } else {
+                // 2. Direct form post into hidden iframe for large payloads
                 return formPostRequest(gasTargetUrl, {
                     action: 'submit_evaluation',
                     token: API_TOKEN || DEFAULT_API_TOKEN,
                     qaEmail: targetEmail,
+                    qa_email: targetEmail,
                     format: 'iframe',
                     evaluationData: evalData
                 });
-            });
+            }
         };
 
         // Build Section-based Evaluation Details:

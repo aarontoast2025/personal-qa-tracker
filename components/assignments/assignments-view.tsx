@@ -385,6 +385,7 @@ export function AssignmentsView({ userEmail, initialWebAppUrl }: AssignmentsView
               agentEmail: asg.agent_email,
               agentSnapshot: asg.agent_snapshot,
               evaluationType: asg.evaluation_type || "Manual Audit",
+              rubricId: asg.rubric_id,
               rubric_id: asg.rubric_id,
               score: 0,
               status: "Partial",
