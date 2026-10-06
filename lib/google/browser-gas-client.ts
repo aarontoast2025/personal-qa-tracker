@@ -242,19 +242,25 @@ export function browserFormPostRequest<T = any>(
 export function compactEvaluationData(data: Record<string, any>): Record<string, any> {
   const clone = { ...data };
 
-  // 1. Compact agent snapshot to avoid unnecessary metadata bloat in URL
+  // 1. Preserve complete agent snapshot details
   if (clone.agentSnapshot && typeof clone.agentSnapshot === "object") {
-    clone.agentSnapshot = {
-      fullName:
-        clone.agentSnapshot.fullName ||
-        clone.agentSnapshot.displayName ||
-        clone.agentName ||
-        "",
-      displayName: clone.agentSnapshot.displayName || clone.agentName || "",
-      toasttabEmail:
-        clone.agentSnapshot.toasttabEmail || clone.agentEmail || "",
-      role: clone.agentSnapshot.role || "Agent",
-    };
+    let snap = clone.agentSnapshot;
+    if (typeof snap === "string") {
+      try {
+        snap = JSON.parse(snap);
+      } catch {
+        snap = null;
+      }
+    }
+    if (snap && typeof snap === "object") {
+      clone.agentSnapshot = {
+        ...snap,
+        displayName: snap.displayName || clone.agentName || snap.fullName || "",
+        fullName: snap.fullName || snap.displayName || clone.agentName || "",
+        toasttabEmail: snap.toasttabEmail || snap.email || clone.agentEmail || "",
+        role: snap.role || "Agent",
+      };
+    }
   }
 
   // 2. Compact long text fields

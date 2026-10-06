@@ -2665,12 +2665,12 @@
 
             var compactSnap = null;
             if (agentSnap && typeof agentSnap === 'object') {
-                compactSnap = {
+                compactSnap = Object.assign({}, agentSnap, {
                     fullName: agentSnap.fullName || agentSnap.displayName || resolvedAgentName || '',
                     displayName: agentSnap.displayName || resolvedAgentName || '',
                     toasttabEmail: agentSnap.toasttabEmail || selectedAgentEmail || '',
                     role: agentSnap.role || 'Agent'
-                };
+                });
             }
 
             var evalData = {
