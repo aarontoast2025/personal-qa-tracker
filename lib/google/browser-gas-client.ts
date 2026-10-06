@@ -104,7 +104,7 @@ export function browserJsonpRequest<T = any>(
 export function browserFormPostRequest<T = any>(
   url: string,
   payload: Record<string, any>,
-  timeoutMs: number = 30000
+  timeoutMs: number = 60000
 ): Promise<T> {
   return new Promise((resolve, reject) => {
     if (typeof window === "undefined") {
@@ -118,22 +118,31 @@ export function browserFormPostRequest<T = any>(
     iframe.id = frameName;
     iframe.style.display = "none";
 
+    const form = document.createElement("form");
     let isHandled = false;
+    let graceTimer: ReturnType<typeof setTimeout> | null = null;
 
     const cleanup = () => {
       window.removeEventListener("message", messageHandler);
+      if (graceTimer) clearTimeout(graceTimer);
       setTimeout(() => {
         if (iframe.parentNode) iframe.parentNode.removeChild(iframe);
         if (form.parentNode) form.parentNode.removeChild(form);
       }, 1000);
     };
 
+    const fail = (msg: string) => {
+      if (isHandled) return;
+      isHandled = true;
+      clearTimeout(timeoutId);
+      cleanup();
+      reject(new Error(msg));
+    };
+
     const timeoutId = setTimeout(() => {
-      if (!isHandled) {
-        isHandled = true;
-        cleanup();
-        resolve({ success: true, message: "Saved via background browser form post" } as any);
-      }
+      fail(
+        "Google Apps Script did not respond. Please ensure you are logged into your Toast Google account and try again."
+      );
     }, timeoutMs);
 
     const messageHandler = (event: MessageEvent) => {
@@ -158,68 +167,51 @@ export function browserFormPostRequest<T = any>(
 
     window.addEventListener("message", messageHandler);
 
-    // Frame onload fires when Apps Script finishes processing and returns HTTP response
+    // When the cross-origin Apps Script response page loads, it should postMessage the result.
+    // If it loads but never posts a message (e.g. login page or raw JSON error), report failure
+    // instead of silently assuming success.
     iframe.onload = () => {
-      setTimeout(() => {
-        if (!isHandled) {
-          isHandled = true;
-          clearTimeout(timeoutId);
-          cleanup();
-          resolve({ success: true, message: "Saved via background browser form post" } as any);
-        }
-      }, 1000);
+      let isCrossOrigin = false;
+      try {
+        // Readable only while the iframe is still the initial same-origin about:blank page
+        void iframe.contentWindow?.location.href;
+      } catch {
+        isCrossOrigin = true;
+      }
+      if (!isCrossOrigin || isHandled) return;
+      if (graceTimer) clearTimeout(graceTimer);
+      graceTimer = setTimeout(() => {
+        fail(
+          "Google Apps Script did not confirm the save, so the Google Sheet was NOT updated. Please make sure you are logged into your Toast Google account and try again."
+        );
+      }, 5000);
     };
 
-    const form = document.createElement("form");
+    // Send the body as RAW JSON using enctype="text/plain".
+    // The deployed Apps Script (handleApiPost) does JSON.parse(e.postData.contents) first, so a
+    // urlencoded body ("payload=...&format=...") makes it throw before anything is written.
+    // text/plain forms serialize as `name=value\r\n`; we split the JSON so the "=" falls inside a
+    // trailing padding string, producing valid JSON: {...,"_pad":"="}
+    const bodyObj: Record<string, any> = { ...(payload || {}) };
+    if (bodyObj.qaEmail && !bodyObj.qa_email) bodyObj.qa_email = bodyObj.qaEmail;
+    if (bodyObj.qa_email && !bodyObj.qaEmail) bodyObj.qaEmail = bodyObj.qa_email;
+    bodyObj.format = "iframe";
+    delete bodyObj._pad;
+    bodyObj._pad = "";
+    const json = JSON.stringify(bodyObj); // always ends with ,"_pad":""}
+
     form.method = "POST";
     form.action = targetUrl;
     form.target = frameName;
+    form.enctype = "text/plain";
+    form.acceptCharset = "UTF-8";
     form.style.display = "none";
 
-    // 1. Send JSON-stringified full payload
-    const inputPayload = document.createElement("input");
-    inputPayload.type = "hidden";
-    inputPayload.name = "payload";
-    inputPayload.value = typeof payload === "object" ? JSON.stringify(payload) : String(payload);
-    form.appendChild(inputPayload);
-
-    // 2. Format parameter
-    const inputFormat = document.createElement("input");
-    inputFormat.type = "hidden";
-    inputFormat.name = "format";
-    inputFormat.value = "iframe";
-    form.appendChild(inputFormat);
-
-    // 3. Top-level parameters for Apps Script doPost(e) compatibility
-    if (typeof payload === "object" && payload !== null) {
-      Object.keys(payload).forEach((key) => {
-        if (key !== "payload" && key !== "format") {
-          const val = payload[key];
-          if (val !== undefined && val !== null) {
-            const input = document.createElement("input");
-            input.type = "hidden";
-            input.name = key;
-            input.value = typeof val === "object" ? JSON.stringify(val) : String(val);
-            form.appendChild(input);
-          }
-        }
-      });
-      const emailVal = payload.qaEmail || payload.qa_email;
-      if (emailVal && !payload.qa_email) {
-        const input = document.createElement("input");
-        input.type = "hidden";
-        input.name = "qa_email";
-        input.value = String(emailVal);
-        form.appendChild(input);
-      }
-      if (emailVal && !payload.qaEmail) {
-        const input = document.createElement("input");
-        input.type = "hidden";
-        input.name = "qaEmail";
-        input.value = String(emailVal);
-        form.appendChild(input);
-      }
-    }
+    const input = document.createElement("input");
+    input.type = "hidden";
+    input.name = json.slice(0, -2); // {...,"_pad":"
+    input.value = json.slice(-2); // "}
+    form.appendChild(input);
 
     document.body.appendChild(iframe);
     document.body.appendChild(form);
