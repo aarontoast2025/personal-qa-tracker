@@ -17,8 +17,10 @@ import {
   AlertCircle,
   AlertTriangle,
   Calendar,
+  Check,
   CheckCircle2,
   Clock,
+  Copy,
   ExternalLink,
   Filter,
   Loader2,
@@ -82,6 +84,7 @@ export function AssignmentsView({ userEmail, initialWebAppUrl }: AssignmentsView
   const [evalMap, setEvalMap] = useState<Record<string, any>>({});
   const [interactionInputs, setInteractionInputs] = useState<Record<string, string>>({});
   const [checkingId, setCheckingId] = useState<string | null>(null);
+  const [copiedId, setCopiedId] = useState<string | null>(null);
   const [rowErrors, setRowErrors] = useState<Record<string, string | null>>({});
 
   const { startStr, endStr } = getDateRange(currentDate, mode);
@@ -109,7 +112,7 @@ export function AssignmentsView({ userEmail, initialWebAppUrl }: AssignmentsView
           const asgIds = asgList.map((a) => a.id);
           const { data: evals } = await supabase
             .from("evaluations")
-            .select("id, assignment_id, interaction_id, score, evaluation_type, rubric_id, evaluation_details, sync_status")
+            .select("*")
             .in("assignment_id", asgIds);
 
           const map: Record<string, any> = {};
@@ -159,6 +162,14 @@ export function AssignmentsView({ userEmail, initialWebAppUrl }: AssignmentsView
                         evaluation_type: ev.evaluationType || asg.evaluation_type,
                         rubric_id: ev.rubricId || asg.rubric_id,
                         evaluation_details: ev.details || ev.evaluationDetails || {},
+                        date_of_interaction: ev.dateOfInteraction || "",
+                        submitted_at: ev.submittedAt || "",
+                        call_ani_dnis: ev.callAniDnis || "",
+                        case_no: ev.caseNo || "",
+                        call_duration: ev.callDuration || "",
+                        case_category: ev.caseCategory || "",
+                        case_sub_category: ev.caseSubCategory || "",
+                        issue_concern: ev.issueConcern || "",
                         sync_status: "synced",
                       },
                     }));
@@ -182,6 +193,13 @@ export function AssignmentsView({ userEmail, initialWebAppUrl }: AssignmentsView
                         rubric_id: ev.rubricId || asg.rubric_id,
                         evaluation_type: ev.evaluationType || asg.evaluation_type,
                         evaluation_details: ev.details || ev.evaluationDetails || {},
+                        date_of_interaction: ev.dateOfInteraction || null,
+                        call_ani_dnis: ev.callAniDnis || null,
+                        case_no: ev.caseNo || null,
+                        call_duration: ev.callDuration || null,
+                        case_category: ev.caseCategory || null,
+                        case_sub_category: ev.caseSubCategory || null,
+                        issue_concern: ev.issueConcern || null,
                         qa_name: ev.qaName || userEmail.split("@")[0] || "QA Specialist",
                         qa_email: asg.qa_email,
                         sync_status: "synced",
@@ -589,6 +607,117 @@ export function AssignmentsView({ userEmail, initialWebAppUrl }: AssignmentsView
     }
   }
 
+  // Copy evaluation annotation details to clipboard
+  async function handleCopyAnnotation(asg: Assignment) {
+    let ev = evalMap[asg.id];
+    if (!ev) {
+      try {
+        const { data } = await supabase
+          .from("evaluations")
+          .select("*")
+          .eq("assignment_id", asg.id)
+          .maybeSingle();
+        if (data) {
+          ev = data;
+          setEvalMap((prev) => ({ ...prev, [asg.id]: data }));
+        }
+      } catch (e) {
+        console.error("Failed to fetch evaluation for annotation:", e);
+      }
+    }
+    ev = ev || {};
+
+    const snap: any = asg.agent_snapshot || {};
+    const agentName =
+      snap.displayName ||
+      snap.display_name ||
+      snap.fullName ||
+      snap.full_name ||
+      ev.agent_name ||
+      asg.agent_email ||
+      "";
+
+    const iid = interactionInputs[asg.id] || ev.interaction_id || "";
+    const dateInteraction = ev.date_of_interaction || "";
+
+    let dateEval = "";
+    if (ev.submitted_at) {
+      try {
+        const d = new Date(ev.submitted_at);
+        if (!isNaN(d.getTime())) {
+          dateEval = format(d, "yyyy-MM-dd");
+        } else {
+          dateEval = String(ev.submitted_at).split("T")[0];
+        }
+      } catch {
+        dateEval = String(ev.submitted_at).split("T")[0];
+      }
+    } else if (asg.date) {
+      dateEval = asg.date;
+    }
+
+    const aniDnis = ev.call_ani_dnis || "";
+    const caseNo = ev.case_no || "";
+    const duration = ev.call_duration || "";
+
+    const cat = (ev.case_category || "").trim();
+    const subCat = (ev.case_sub_category || "").trim();
+    let categoryText = "";
+    if (cat && subCat) {
+      categoryText = `${cat} > ${subCat}`;
+    } else if (cat) {
+      categoryText = cat;
+    } else if (subCat) {
+      categoryText = subCat;
+    }
+
+    const issue = ev.issue_concern || "";
+
+    const annotationText = [
+      `Interaction ID: ${iid}`,
+      `Advocate Name: ${agentName}`,
+      `Date of Interactions: ${dateInteraction}`,
+      `Date of Evaluations: ${dateEval}`,
+      `Call ANI/DNIS: ${aniDnis}`,
+      `Case #: ${caseNo}`,
+      `Call Duration: ${duration}`,
+      `Case Category: ${categoryText}`,
+      `Issue/Concern: ${issue}`,
+    ].join("\n");
+
+    try {
+      if (navigator?.clipboard?.writeText) {
+        await navigator.clipboard.writeText(annotationText);
+      } else {
+        throw new Error("Clipboard API unavailable");
+      }
+      setCopiedId(asg.id);
+      setSyncNotice(`Evaluation annotation for ${asg.id} copied to clipboard!`);
+      setTimeout(() => setCopiedId(null), 2500);
+      setTimeout(() => setSyncNotice(null), 3000);
+    } catch {
+      const textarea = document.createElement("textarea");
+      textarea.value = annotationText;
+      textarea.style.position = "fixed";
+      textarea.style.left = "-9999px";
+      textarea.style.top = "-9999px";
+      document.body.appendChild(textarea);
+      textarea.focus();
+      textarea.select();
+      try {
+        document.execCommand("copy");
+        setCopiedId(asg.id);
+        setSyncNotice(`Evaluation annotation for ${asg.id} copied to clipboard!`);
+        setTimeout(() => setCopiedId(null), 2500);
+        setTimeout(() => setSyncNotice(null), 3000);
+      } catch (err) {
+        console.error("Failed to copy annotation:", err);
+      } finally {
+        document.body.removeChild(textarea);
+      }
+    }
+  }
+
   // Trigger delete modal for an assignment
   function handleDeleteClick(asg: Assignment) {
     if (deletingId || pushingId) return;
@@ -942,6 +1071,18 @@ export function AssignmentsView({ userEmail, initialWebAppUrl }: AssignmentsView
                       </td>
                       <td className="py-3.5 px-4 text-right whitespace-nowrap">
                         <div className="inline-flex items-center justify-end gap-1.5">
+                          <button
+                            type="button"
+                            onClick={() => handleCopyAnnotation(asg)}
+                            title="Copy evaluation annotation to clipboard"
+                            className="p-1.5 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-500 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white hover:bg-slate-50 dark:hover:bg-slate-700/60 transition-all shadow-sm active:scale-95"
+                          >
+                            {copiedId === asg.id ? (
+                              <Check className="w-4 h-4 text-emerald-600 dark:text-emerald-400" />
+                            ) : (
+                              <Copy className="w-4 h-4" />
+                            )}
+                          </button>
                           {(asg.status === "Partial" || asg.status === "Completed") && (
                             <button
                               type="button"
