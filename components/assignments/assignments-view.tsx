@@ -323,9 +323,75 @@ export function AssignmentsView({ userEmail, initialWebAppUrl }: AssignmentsView
         evalId = `EVL-${Date.now()}-${Math.floor(Math.random() * 1000)}`;
       }
 
+      let resolvedSnapshot = asg.agent_snapshot || {};
+      if (typeof resolvedSnapshot === "string") {
+        try {
+          resolvedSnapshot = JSON.parse(resolvedSnapshot);
+        } catch {
+          resolvedSnapshot = {};
+        }
+      }
+
+      // If snapshot is missing critical fields, fetch from agents table in Supabase
+      if (
+        !resolvedSnapshot.supervisor ||
+        !resolvedSnapshot.location ||
+        !resolvedSnapshot.skill ||
+        !resolvedSnapshot.channel
+      ) {
+        const lookupKey = (
+          asg.agent_email ||
+          resolvedSnapshot.toasttabEmail ||
+          resolvedSnapshot.eid ||
+          ""
+        ).trim();
+        if (lookupKey) {
+          const { data: dbAg } = await supabase
+            .from("agents")
+            .select(
+              "eid, case_safe_id, toasttab_email, internal_ibex_email, full_name, display_name, location, skill, channel, tier, role, wave, production_date, supervisor, manager"
+            )
+            .or(
+              `eid.eq.${lookupKey},toasttab_email.ilike.${lookupKey},internal_ibex_email.ilike.${lookupKey}`
+            )
+            .maybeSingle();
+
+          if (dbAg) {
+            resolvedSnapshot = {
+              eid: String(resolvedSnapshot.eid || dbAg.eid || "").trim(),
+              role: resolvedSnapshot.role || dbAg.role || "Agent",
+              tier: resolvedSnapshot.tier || dbAg.tier || "",
+              wave: resolvedSnapshot.wave || dbAg.wave || "",
+              skill: resolvedSnapshot.skill || dbAg.skill || "",
+              channel: resolvedSnapshot.channel || dbAg.channel || "",
+              manager: resolvedSnapshot.manager || dbAg.manager || "",
+              fullName: resolvedSnapshot.fullName || dbAg.full_name || "",
+              location: resolvedSnapshot.location || dbAg.location || "",
+              caseSafeId: resolvedSnapshot.caseSafeId || dbAg.case_safe_id || "",
+              supervisor: resolvedSnapshot.supervisor || dbAg.supervisor || "",
+              displayName:
+                resolvedSnapshot.displayName ||
+                dbAg.display_name ||
+                resolvedSnapshot.fullName ||
+                dbAg.full_name ||
+                "",
+              toasttabEmail:
+                resolvedSnapshot.toasttabEmail ||
+                dbAg.toasttab_email ||
+                asg.agent_email ||
+                "",
+              productionDate:
+                resolvedSnapshot.productionDate || dbAg.production_date || "",
+              internalIbexEmail:
+                resolvedSnapshot.internalIbexEmail || dbAg.internal_ibex_email || "",
+            };
+          }
+        }
+      }
+
       const agentName =
-        asg.agent_snapshot?.displayName ||
-        asg.agent_snapshot?.fullName ||
+        resolvedSnapshot.displayName ||
+        resolvedSnapshot.fullName ||
         asg.agent_email;
 
       const evalRecord = {
@@ -334,7 +400,7 @@ export function AssignmentsView({ userEmail, initialWebAppUrl }: AssignmentsView
         interaction_id: trimmed,
         assignment_id: asg.id,
         agent_name: agentName,
-        agent_snapshot: asg.agent_snapshot || null,
+        agent_snapshot: resolvedSnapshot,
         qa_email: userEmail,
         qa_name: userEmail,
         score: 0,
@@ -363,7 +429,7 @@ export function AssignmentsView({ userEmail, initialWebAppUrl }: AssignmentsView
       // 4. Update assignment status to Partial in Supabase
       const { error: asgErr } = await supabase
         .from("assignments")
-        .update({ status: "Partial", synced_at: nowIso })
+        .update({ status: "Partial", agent_snapshot: resolvedSnapshot, synced_at: nowIso })
         .eq("id", asg.id);
 
       if (asgErr) {
@@ -383,7 +449,7 @@ export function AssignmentsView({ userEmail, initialWebAppUrl }: AssignmentsView
               interactionId: trimmed,
               agentName: agentName,
               agentEmail: asg.agent_email,
-              agentSnapshot: asg.agent_snapshot,
+              agentSnapshot: resolvedSnapshot,
               evaluationType: asg.evaluation_type || "Manual Audit",
               rubricId: asg.rubric_id,
               rubric_id: asg.rubric_id,
@@ -447,10 +513,31 @@ export function AssignmentsView({ userEmail, initialWebAppUrl }: AssignmentsView
 
       // 2. Submit to Google Apps Script directly from the browser using active Toast session
       const targetUrl = prepData.webAppUrl || webAppUrl || DEFAULT_WEB_APP_URL;
+      const targetQaEmail = prepData.qaEmail || userEmail;
+
+      // 2a. Phase 1: Push partial payload with complete canonical snapshot.
+      // This causes Google Apps Script's markAssignmentsPartial(ss, [evalData]) to write
+      // the complete Agent Snapshot (supervisor, location, channel, skill, eid) into the Assignments sheet row!
+      if (prepData.partialEvaluationData) {
+        try {
+          await submitEvaluationBrowser(
+            targetUrl,
+            DEFAULT_API_TOKEN,
+            targetQaEmail,
+            prepData.partialEvaluationData
+          );
+        } catch (phase1Err: any) {
+          console.warn("Phase 1 partial snapshot sync note:", phase1Err.message);
+        }
+      }
+
+      // 2b. Phase 2: Submit completed evaluation.
+      // This causes Google Apps Script to log the completed evaluation and set Status to 'Completed'
+      // in the Assignments sheet row while preserving the complete Agent Snapshot written in Phase 1!
       const gasResult = await submitEvaluationBrowser(
         targetUrl,
         DEFAULT_API_TOKEN,
-        prepData.qaEmail || userEmail,
+        targetQaEmail,
         prepData.evaluationData
       );
 

@@ -142,38 +142,78 @@ export async function POST(request: Request) {
     const lookupEmail = (
       assignment.agent_email ||
       rawSnap.toasttabEmail ||
+      rawSnap.toasttab_email ||
       rawSnap.email ||
       ""
     ).trim().toLowerCase();
 
+    const lookupEid = (
+      rawSnap.eid ||
+      assignment.agent_eid ||
+      (/^\d+$/.test(lookupEmail) ? lookupEmail : "")
+    ).trim();
+
+    const lookupName = (
+      rawSnap.fullName ||
+      rawSnap.full_name ||
+      rawSnap.displayName ||
+      rawSnap.display_name ||
+      evaluation.agent_name ||
+      assignment.agent_name ||
+      ""
+    ).trim();
+
     let dbAgent: any = null;
-    if (lookupEmail) {
+    if (lookupEid) {
+      const { data: matchedByEid } = await supabase
+        .from("agents")
+        .select("eid, case_safe_id, toasttab_email, internal_ibex_email, full_name, display_name, location, skill, channel, tier, role, wave, production_date, supervisor, manager")
+        .eq("eid", lookupEid)
+        .maybeSingle();
+      if (matchedByEid) dbAgent = matchedByEid;
+    }
+
+    if (!dbAgent && lookupEmail && !/^\d+$/.test(lookupEmail)) {
       const { data: matchedAgent } = await supabase
         .from("agents")
         .select("eid, case_safe_id, toasttab_email, internal_ibex_email, full_name, display_name, location, skill, channel, tier, role, wave, production_date, supervisor, manager")
         .or(`toasttab_email.ilike.${lookupEmail},internal_ibex_email.ilike.${lookupEmail}`)
         .maybeSingle();
-      dbAgent = matchedAgent;
+      if (matchedAgent) dbAgent = matchedAgent;
+    }
+
+    if (!dbAgent && lookupName) {
+      const { data: matchedByName } = await supabase
+        .from("agents")
+        .select("eid, case_safe_id, toasttab_email, internal_ibex_email, full_name, display_name, location, skill, channel, tier, role, wave, production_date, supervisor, manager")
+        .or(`full_name.ilike.${lookupName},display_name.ilike.${lookupName}`)
+        .maybeSingle();
+      if (matchedByName) dbAgent = matchedByName;
     }
 
     const toasttabEmail =
       rawSnap.toasttabEmail ||
+      rawSnap.toasttab_email ||
       dbAgent?.toasttab_email ||
       rawSnap.email ||
-      lookupEmail;
+      (!/^\d+$/.test(lookupEmail) ? lookupEmail : "");
 
     const fullName =
       rawSnap.fullName ||
+      rawSnap.full_name ||
       dbAgent?.full_name ||
       rawSnap.displayName ||
+      rawSnap.display_name ||
       dbAgent?.display_name ||
       evaluation.agent_name ||
       "";
 
     const displayName =
       rawSnap.displayName ||
+      rawSnap.display_name ||
       dbAgent?.display_name ||
       rawSnap.fullName ||
+      rawSnap.full_name ||
       dbAgent?.full_name ||
       evaluation.agent_name ||
       fullName;
@@ -188,12 +228,12 @@ export async function POST(request: Request) {
       manager: rawSnap.manager || dbAgent?.manager || "",
       fullName,
       location: rawSnap.location || dbAgent?.location || "",
-      caseSafeId: rawSnap.caseSafeId || dbAgent?.case_safe_id || "",
+      caseSafeId: rawSnap.caseSafeId || rawSnap.case_safe_id || dbAgent?.case_safe_id || "",
       supervisor: rawSnap.supervisor || dbAgent?.supervisor || "",
       displayName,
       toasttabEmail,
-      productionDate: rawSnap.productionDate || dbAgent?.production_date || "",
-      internalIbexEmail: rawSnap.internalIbexEmail || dbAgent?.internal_ibex_email || "",
+      productionDate: rawSnap.productionDate || rawSnap.production_date || dbAgent?.production_date || "",
+      internalIbexEmail: rawSnap.internalIbexEmail || rawSnap.internal_ibex_email || dbAgent?.internal_ibex_email || "",
     };
 
     const agentName = displayName || fullName || assignment.agent_email;
@@ -229,6 +269,14 @@ export async function POST(request: Request) {
       isPartial: false,
     };
 
+    const partialEvaluationData = {
+      ...evaluationData,
+      status: "Partial",
+      assignmentStatus: "Partial",
+      isPartial: true,
+      score: 0,
+    };
+
     const qaEmail = assignment.qa_email || user?.email || "";
 
     // If browser is requesting the prepared payload for browser-side submission:
@@ -236,12 +284,20 @@ export async function POST(request: Request) {
       return NextResponse.json({
         success: true,
         evaluationData,
+        partialEvaluationData,
         qaEmail,
         webAppUrl: config.url,
       });
     }
 
     // 4. Push to Google Apps Script Web App
+    // Ensure the Assignments sheet row receives the full agent snapshot via partial sync first
+    try {
+      await submitEvaluationToWebApp(config, qaEmail, partialEvaluationData);
+    } catch (partErr: any) {
+      console.warn("Server partial snapshot sync notice:", partErr.message);
+    }
+
     const result = await submitEvaluationToWebApp(config, qaEmail, evaluationData);
 
     if (!result || result.success === false) {

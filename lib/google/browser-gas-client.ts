@@ -254,11 +254,11 @@ export function compactEvaluationData(data: Record<string, any>): Record<string,
     }
     if (snap && typeof snap === "object") {
       const toasttabEmail =
-        snap.toasttabEmail || snap.email || clone.agentEmail || "";
+        snap.toasttabEmail || snap.toasttab_email || snap.email || clone.agentEmail || "";
       const fullName =
-        snap.fullName || snap.displayName || clone.agentName || "";
+        snap.fullName || snap.full_name || snap.displayName || snap.display_name || clone.agentName || "";
       const displayName =
-        snap.displayName || snap.fullName || clone.agentName || fullName;
+        snap.displayName || snap.display_name || snap.fullName || snap.full_name || clone.agentName || fullName;
 
       clone.agentSnapshot = {
         eid: snap.eid ? String(snap.eid) : "",
